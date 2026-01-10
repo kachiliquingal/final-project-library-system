@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* TUS ESTILOS PERSONALIZADOS */
+body {
+  background-color: #f3f4f6; /* Un gris muy suave para el fondo */
+  font-family: 'Inter', system-ui, sans-serif; /* Fuente moderna */
+}
+
+/* Opcional: Para asegurar que el logo de Google no se desborde si falla algo */
+img {
+  max-width: 100%;
+  height: auto;
+}
