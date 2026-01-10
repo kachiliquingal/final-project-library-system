@@ -16,7 +16,6 @@ export const AuthProvider = ({ children }) => {
 
     const initAuth = async () => {
       try {
-        // Temporizador de seguridad por si Supabase tarda mucho
         const timeoutPromise = new Promise((_, reject) =>
           setTimeout(() => reject(new Error("Timeout")), 2000)
         );
@@ -93,9 +92,6 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // --- NUEVAS FUNCIONES ---
-
-  // 1. Login con Correo y Contraseña
   const loginWithPassword = async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
@@ -105,14 +101,13 @@ export const AuthProvider = ({ children }) => {
     return data;
   };
 
-  // 2. Registro de Usuario Nuevo (Con Full Name para el trigger)
   const registerWithPassword = async (email, password, fullName) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
-          full_name: fullName, // IMPORTANTE: Esto activa tu trigger en la DB
+          full_name: fullName,
         },
       },
     });
@@ -120,7 +115,6 @@ export const AuthProvider = ({ children }) => {
     return data;
   };
 
-  // 3. Login Social (Google / Github)
   const loginWithOAuth = async (provider) => {
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider,
@@ -131,8 +125,20 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
+    // 1. CRUCIAL! Notify React immediately to change the screen
+    setUser(null);
+    setLoading(false);
+
+    // 2. Clear browser garbage
     localStorage.clear();
-    await supabase.auth.signOut();
+    localStorage.removeItem("sb-agcjuoczilcpdthavaoo-auth-token"); // Ensure specific deletion
+
+    // 3. Notify Supabase (if it fails, it doesn't matter because we've already visually logged you out)
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error("Error al cerrar sesión en servidor:", error);
+    }
   };
 
   const value = {

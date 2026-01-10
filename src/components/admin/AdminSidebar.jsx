@@ -1,27 +1,32 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   Book,
   Users,
   ClipboardList,
   LogOut,
-} from "lucide-react"; // Importamos ClipboardList
+} from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 
 export default function AdminSidebar() {
   const { logout } = useAuth();
+  const navigate = useNavigate();
 
-  // MENÚ EXACTO COMO EL WIREFRAME
   const menuItems = [
     { icon: LayoutDashboard, label: "Inicio", path: "/admin/dashboard" },
     { icon: Book, label: "Inventario", path: "/admin/inventory" },
-    { icon: ClipboardList, label: "Préstamos", path: "/admin/loans" }, // Reemplaza Configuración
+    { icon: ClipboardList, label: "Préstamos", path: "/admin/loans" },
     { icon: Users, label: "Usuarios", path: "/admin/users" },
   ];
 
+  const handleLogout = async (e) => {
+    e.preventDefault();
+    await logout();
+    navigate('/login', { replace: true });
+  };
+
   return (
     <aside className="w-64 bg-primary text-white flex flex-col h-screen fixed left-0 top-0 shadow-xl z-50">
-      {/* Logo Area */}
       <div className="p-8 flex items-center gap-3">
         <div className="bg-white/10 p-2 rounded-lg backdrop-blur-sm">
           <Book className="w-6 h-6 text-white" />
@@ -32,7 +37,6 @@ export default function AdminSidebar() {
         </div>
       </div>
 
-      {/* Navigation */}
       <nav className="flex-1 px-4 space-y-3 mt-4">
         {menuItems.map((item) => (
           <NavLink
@@ -52,11 +56,11 @@ export default function AdminSidebar() {
         ))}
       </nav>
 
-      {/* Logout */}
       <div className="p-4 border-t border-white/10 mb-2 mx-4">
         <button
-          onClick={logout}
-          className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-red-200 hover:bg-red-500/20 hover:text-white transition-all group"
+          type="button"
+          onClick={handleLogout}
+          className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-red-200 hover:bg-red-500/20 hover:text-white transition-all group cursor-pointer"
         >
           <LogOut className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
           <span>Cerrar Sesión</span>
