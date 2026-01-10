@@ -7,40 +7,32 @@ import {
 import { AuthProvider } from "./context/AuthContext";
 import LoginPage from "./pages/LoginPage";
 
-// Importar Layouts y Páginas de Admin
+// Admin Imports
 import AdminLayout from "./components/admin/AdminLayout";
 import AdminDashboard from "./pages/admin/AdminDashboard";
+import InventoryPage from "./pages/admin/InventoryPage"; // <--- IMPORT NUEVO
 
 function App() {
   return (
     <Router>
       <AuthProvider>
         <Routes>
-          {/* Ruta Pública */}
+          {/* Public Route */}
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<LoginPage />} />
 
-          {/* 🔐 RUTAS PROTEGIDAS DE ADMIN */}
+          {/* 🔐 Admin Routes */}
           <Route path="/admin" element={<AdminLayout />}>
-            {/* Cuando entras a /admin, te redirige a dashboard */}
             <Route index element={<Navigate to="/admin/dashboard" replace />} />
-
-            {/* Páginas internas del admin */}
             <Route path="dashboard" element={<AdminDashboard />} />
-
-            {/* Placeholders para las otras opciones del menú */}
-            <Route path="inventory" element={<div>Inventario (Pronto)</div>} />
-            <Route
-              path="users"
-              element={<div>Gestión de Usuarios (Pronto)</div>}
-            />
-            <Route
-              path="settings"
-              element={<div>Configuración (Pronto)</div>}
-            />
+            <Route path="inventory" element={<InventoryPage />} />{" "}
+            {/* <--- RUTA CONECTADA */}
+            {/* Placeholders */}
+            <Route path="loans" element={<div>Préstamos (Pronto)</div>} />
+            <Route path="users" element={<div>Usuarios (Pronto)</div>} />
           </Route>
 
-          {/* 👤 RUTAS DE USUARIO (Pendiente) */}
+          {/* 👤 User Routes */}
           <Route
             path="/user/catalog"
             element={<div>Catálogo de Usuario</div>}
