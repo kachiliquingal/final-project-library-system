@@ -10,7 +10,8 @@ import LoginPage from "./pages/LoginPage";
 // Admin Imports
 import AdminLayout from "./components/admin/AdminLayout";
 import AdminDashboard from "./pages/admin/AdminDashboard";
-import InventoryPage from "./pages/admin/InventoryPage"; // <--- IMPORT NUEVO
+import InventoryPage from "./pages/admin/InventoryPage";
+import UsersPage from "./pages/admin/UsersPage"; // <--- NUEVO IMPORT
 
 function App() {
   return (
@@ -25,11 +26,14 @@ function App() {
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<Navigate to="/admin/dashboard" replace />} />
             <Route path="dashboard" element={<AdminDashboard />} />
-            <Route path="inventory" element={<InventoryPage />} />{" "}
-            {/* <--- RUTA CONECTADA */}
-            {/* Placeholders */}
-            <Route path="loans" element={<div>Préstamos (Pronto)</div>} />
-            <Route path="users" element={<div>Usuarios (Pronto)</div>} />
+            <Route path="inventory" element={<InventoryPage />} />
+            <Route path="users" element={<UsersPage />} />{" "}
+            {/* <--- RUTA ACTIVADA */}
+            {/* Placeholder para Préstamos */}
+            <Route
+              path="loans"
+              element={<div>Gestión de Préstamos (Próximamente)</div>}
+            />
           </Route>
 
           {/* 👤 User Routes */}
