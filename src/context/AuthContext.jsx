@@ -16,15 +16,12 @@ export const AuthProvider = ({ children }) => {
 
     const initAuth = async () => {
       try {
-        // --- TEMPORIZADOR DE SEGURIDAD ---
-        // Si Supabase no responde en 2 segundos, forzamos el error para limpiar
+        // Temporizador de seguridad por si Supabase tarda mucho
         const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Tiempo de espera agotado")), 2000)
+          setTimeout(() => reject(new Error("Timeout")), 2000)
         );
-
         const sessionPromise = supabase.auth.getSession();
 
-        // Corremos una carrera: ¿Quién gana? ¿La sesión o el temporizador?
         const {
           data: { session },
           error,
@@ -38,11 +35,7 @@ export const AuthProvider = ({ children }) => {
           setLoading(false);
         }
       } catch (error) {
-        console.warn(
-          "⚠️ Detectado bloqueo de sesión. Ejecutando limpieza automática...",
-          error
-        );
-        // AQUÍ ESTÁ LA SOLUCIÓN AL "MALDITO ERROR":
+        console.warn("Limpiando sesión inestable...", error);
         localStorage.clear();
         if (mounted) {
           setUser(null);
@@ -89,7 +82,6 @@ export const AuthProvider = ({ children }) => {
         name: data?.full_name || authUser.email,
       });
     } catch (error) {
-      // Fallback seguro
       setUser({
         id: authUser.id,
         email: authUser.email,
@@ -101,6 +93,34 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // --- NUEVAS FUNCIONES ---
+
+  // 1. Login con Correo y Contraseña
+  const loginWithPassword = async (email, password) => {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    if (error) throw error;
+    return data;
+  };
+
+  // 2. Registro de Usuario Nuevo (Con Full Name para el trigger)
+  const registerWithPassword = async (email, password, fullName) => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          full_name: fullName, // IMPORTANTE: Esto activa tu trigger en la DB
+        },
+      },
+    });
+    if (error) throw error;
+    return data;
+  };
+
+  // 3. Login Social (Google / Github)
   const loginWithOAuth = async (provider) => {
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider,
@@ -111,13 +131,15 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
-    localStorage.clear(); // Limpiamos primero por si acaso
+    localStorage.clear();
     await supabase.auth.signOut();
   };
 
   const value = {
     user,
     loginWithOAuth,
+    loginWithPassword,
+    registerWithPassword,
     logout,
     loading,
     isAuthenticated: !!user,
@@ -129,19 +151,9 @@ export const AuthProvider = ({ children }) => {
       {!loading ? (
         children
       ) : (
-        // Si tarda más de 3 segundos visualmente, mostramos botón de pánico
         <div className="h-screen flex flex-col items-center justify-center bg-gray-50">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-900 mb-4"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
           <p className="text-gray-600 font-medium">Cargando sistema...</p>
-          <button
-            onClick={() => {
-              localStorage.clear();
-              window.location.reload();
-            }}
-            className="mt-4 text-xs text-red-500 underline hover:text-red-700 cursor-pointer"
-          >
-            ¿Se quedó pegado? Clic aquí para reiniciar
-          </button>
         </div>
       )}
     </AuthContext.Provider>

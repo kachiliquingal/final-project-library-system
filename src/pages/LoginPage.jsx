@@ -1,81 +1,200 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
-import { Lock } from "lucide-react";
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { Lock, Mail, User, Github } from 'lucide-react';
 
 export default function LoginPage() {
-  const { loginWithOAuth, isAuthenticated, user } = useAuth();
+  const { loginWithOAuth, loginWithPassword, registerWithPassword, isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
-  const [error, setError] = useState("");
+  
+  const [isLogin, setIsLogin] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [msg, setMsg] = useState('');
 
-  // Redirección si ya está logueado
+  // Form states
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+
+  // 1. Efecto de seguridad: Si ya detectamos que entró, lo sacamos del Login
   useEffect(() => {
     if (isAuthenticated && user) {
-      if (user.role === "admin") navigate("/admin/dashboard");
-      else navigate("/user/catalog");
+      if (user.role === 'admin') navigate('/admin/dashboard');
+      else navigate('/user/catalog'); // Redirigir a catálogo si es usuario normal
     }
   }, [isAuthenticated, user, navigate]);
 
-  const handleGoogleLogin = async () => {
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setMsg('');
+    setLoading(true);
+
     try {
-      setError("");
-      await loginWithOAuth("google");
+      if (isLogin) {
+        // --- LOGIN ---
+        const { user: loggedUser, error: loginError } = await loginWithPassword(email, password);
+        
+        if (loginError) throw loginError;
+
+        // ¡AQUÍ ESTÁ LA SOLUCIÓN AL "PROCESANDO..."!
+        // Si Supabase no dio error, forzamos la entrada inmediata.
+        if (loggedUser) {
+           // Pequeño truco: Navegamos inmediatamente para no esperar al useEffect
+           // (El AuthContext actualizará el rol en segundo plano)
+           navigate('/admin/dashboard'); 
+        }
+
+      } else {
+        // --- REGISTRO ---
+        if (!fullName) throw new Error("El nombre es requerido");
+        const { user, error: registerError } = await registerWithPassword(email, password, fullName);
+        
+        if (registerError) throw registerError;
+
+        if (user) {
+          setMsg('Cuenta creada con éxito. Ya puedes iniciar sesión.');
+          setIsLogin(true);
+        }
+      }
     } catch (err) {
-      setError("No se pudo conectar con Google.");
+      // Si algo falla, apagamos el loading para que puedas intentar de nuevo
       console.error(err);
+      setError(err.message || 'Error de credenciales o conexión.');
+    } finally {
+      // IMPORTANTE: Esto asegura que el botón se desbloquee siempre
+      setLoading(false);
+    }
+  };
+
+  const handleOAuth = async (provider) => {
+    try {
+      setError('');
+      await loginWithOAuth(provider);
+    } catch (err) {
+      setError(`Error conectando con ${provider}`);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
-      {/* Tarjeta Principal */}
+    <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4 font-sans">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
-        {/* Encabezado Azul UCE */}
-        <div className="bg-primary p-8 text-center">
-          <div className="bg-white/10 p-4 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4 backdrop-blur-sm">
-            <Lock className="w-10 h-10 text-white" />
+        
+        {/* Header Azul */}
+        <div className="bg-primary p-6 text-center">
+          <div className="bg-white/10 p-3 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-3 backdrop-blur-sm">
+            <Lock className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-white tracking-wide">
+          <h1 className="text-xl font-bold text-white tracking-wide">
             Sistema Bibliotecario
           </h1>
-          <p className="text-blue-100 text-sm mt-1">
+          <p className="text-blue-100 text-xs mt-1">
             Universidad Central del Ecuador
           </p>
         </div>
 
-        {/* Cuerpo del Formulario */}
+        {/* Tabs */}
+        <div className="flex border-b border-gray-200">
+          <button
+            onClick={() => { setIsLogin(true); setError(''); setMsg(''); }}
+            className={`flex-1 py-4 text-sm font-semibold transition-colors ${
+              isLogin ? 'text-primary border-b-2 border-primary' : 'text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            INGRESAR
+          </button>
+          <button
+            onClick={() => { setIsLogin(false); setError(''); setMsg(''); }}
+            className={`flex-1 py-4 text-sm font-semibold transition-colors ${
+              !isLogin ? 'text-primary border-b-2 border-primary' : 'text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            CREAR CUENTA
+          </button>
+        </div>
+
+        {/* Form Body */}
         <div className="p-8">
-          {error && (
-            <div className="mb-4 p-3 bg-red-50 text-accent text-sm rounded-lg border border-red-100 text-center">
-              {error}
-            </div>
-          )}
+          {error && <div className="mb-4 p-3 bg-red-50 text-red-600 text-xs rounded border border-red-100 text-center">{error}</div>}
+          {msg && <div className="mb-4 p-3 bg-green-50 text-green-600 text-xs rounded border border-green-100 text-center">{msg}</div>}
 
-          <div className="space-y-4">
-            <p className="text-gray-500 text-center text-sm mb-6">
-              Inicia sesión con tu cuenta institucional
-            </p>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            
+            {!isLogin && (
+              <div className="relative">
+                <User className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Nombre Completo"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all"
+                  required={!isLogin}
+                />
+              </div>
+            )}
 
-            {/* Botón de Google arreglado */}
-            <button
-              onClick={handleGoogleLogin}
-              className="w-full flex items-center justify-center gap-3 bg-white text-gray-700 font-medium py-3 px-4 border border-gray-300 rounded-lg hover:bg-gray-50 hover:shadow transition-all duration-200"
-            >
-              {/* AQUÍ ESTÁ EL ARREGLO: w-6 h-6 limita el tamaño */}
-              <img
-                src="https://www.svgrepo.com/show/475656/google-color.svg"
-                alt="Google"
-                className="w-6 h-6"
+            <div className="relative">
+              <Mail className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+              <input
+                type="email"
+                placeholder="Correo Institucional"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all"
+                required
               />
-              <span>Continuar con Google</span>
+            </div>
+
+            <div className="relative">
+              <Lock className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+              <input
+                type="password"
+                placeholder="Contraseña"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all"
+                required
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-primary text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-800 transition-colors shadow-lg shadow-blue-900/20 text-sm mt-2 disabled:opacity-70 disabled:cursor-not-allowed"
+            >
+              {loading ? 'Procesando...' : (isLogin ? 'INICIAR SESIÓN' : 'REGISTRARSE')}
+            </button>
+          </form>
+
+          <div className="relative mt-8 mb-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-gray-200"></div>
+            </div>
+            <div className="relative flex justify-center text-xs">
+              <span className="px-2 bg-white text-gray-400 uppercase tracking-wider">O continúa con</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <button
+              onClick={() => handleOAuth('github')}
+              className="flex items-center justify-center gap-2 bg-gray-900 text-white py-2.5 px-4 rounded-lg hover:bg-black transition-all text-sm font-medium"
+            >
+              <Github className="w-4 h-4" />
+              <span>GitHub</span>
+            </button>
+
+            <button
+              onClick={() => handleOAuth('google')}
+              className="flex items-center justify-center gap-2 bg-white text-gray-700 border border-gray-300 py-2.5 px-4 rounded-lg hover:bg-gray-50 transition-all text-sm font-medium"
+            >
+              <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="G" className="w-4 h-4" />
+              <span>Google</span>
             </button>
           </div>
-
-          <div className="mt-8 text-center border-t border-gray-100 pt-4">
-            <p className="text-xs text-gray-400">
-              © {new Date().getFullYear()} Facultad de Ingeniería
-            </p>
-          </div>
+          
         </div>
       </div>
     </div>
