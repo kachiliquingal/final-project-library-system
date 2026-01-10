@@ -6,6 +6,8 @@ export default function UsersPage() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  // Estado para controlar qué avatares han fallado al cargar
+  const [imageErrors, setImageErrors] = useState({});
 
   useEffect(() => {
     fetchUsers();
@@ -36,7 +38,6 @@ export default function UsersPage() {
     }
   };
 
-  // Función auxiliar para formatear fechas
   const formatDate = (dateString) => {
     if (!dateString) return "N/A";
     return new Date(dateString).toLocaleDateString("es-EC", {
@@ -44,6 +45,11 @@ export default function UsersPage() {
       month: "short",
       day: "numeric",
     });
+  };
+
+  // Manejador de errores de imagen
+  const handleImageError = (userId) => {
+    setImageErrors((prev) => ({ ...prev, [userId]: true }));
   };
 
   return (
@@ -100,13 +106,15 @@ export default function UsersPage() {
                   >
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
-                        {/* Avatar con iniciales si no hay imagen */}
-                        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm overflow-hidden">
-                          {user.avatar_url ? (
+                        {/* LÓGICA DE AVATAR MEJORADA */}
+                        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm overflow-hidden shrink-0 border border-primary/20">
+                          {user.avatar_url && !imageErrors[user.id] ? (
                             <img
                               src={user.avatar_url}
                               alt="avatar"
                               className="w-full h-full object-cover"
+                              onError={() => handleImageError(user.id)}
+                              referrerPolicy="no-referrer" // Ayuda con imágenes de Google
                             />
                           ) : (
                             user.full_name?.charAt(0).toUpperCase() || "U"
@@ -162,7 +170,6 @@ export default function UsersPage() {
           </table>
         </div>
 
-        {/* Footer simple con conteo */}
         <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 text-xs text-gray-500 text-right">
           Total de usuarios registrados: {users.length}
         </div>
