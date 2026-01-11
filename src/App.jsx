@@ -20,17 +20,18 @@ import LoansPage from "./pages/admin/LoansPage";
 // Layouts y Páginas de Usuario (NUEVO)
 import UserLayout from "./components/user/UserLayout";
 import UserCatalog from "./pages/user/UserCatalog";
+import UserLoans from "./pages/user/UserLoans"; // <--- IMPORTAR
 
 function App() {
   return (
     <Router>
       <AuthProvider>
         <Routes>
-          {/* Ruta Pública: Login */}
+          {/* Public Path: Login */}
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<LoginPage />} />
 
-          {/* 🔴 ZONA DE ADMINISTRADOR (Solo rol 'admin') */}
+          {/* 🔴 ADMIN ZONE (Only 'admin' role) */}
           <Route element={<ProtectedRoute allowedRoles={["admin"]} />}>
             <Route path="/admin" element={<AdminLayout />}>
               <Route
@@ -44,12 +45,12 @@ function App() {
             </Route>
           </Route>
 
-          {/* 🟢 ZONA DE USUARIO/ESTUDIANTE (Solo rol 'user') */}
+          {/* 🟢 USER/STUDENT ZONE (Only 'user' role) */}
           <Route element={<ProtectedRoute allowedRoles={["user"]} />}>
             <Route path="/user" element={<UserLayout />}>
               <Route index element={<Navigate to="/user/catalog" replace />} />
               <Route path="catalog" element={<UserCatalog />} />
-              {/* Aquí agregaremos más páginas de usuario en el futuro */}
+              <Route path="my-loans" element={<UserLoans />} />
             </Route>
           </Route>
         </Routes>
