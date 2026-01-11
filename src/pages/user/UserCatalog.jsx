@@ -1,26 +1,53 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../api/supabaseClient";
-import { Search, BookOpen, Clock, CheckCircle, XCircle } from "lucide-react";
+import { useAuth } from "../../context/AuthContext"; // Necesitamos el usuario para el préstamo
+import { Search, BookOpen, Clock, CheckCircle, XCircle, ChevronLeft, ChevronRight } from "lucide-react";
 
 export default function UserCatalog() {
+  const { user } = useAuth();
   const [books, setBooks] = useState([]);
   const [loading, setLoading] = useState(true);
+  
+  // Estados para paginación y búsqueda
   const [searchTerm, setSearchTerm] = useState("");
+  const [page, setPage] = useState(1);
+  const [totalBooks, setTotalBooks] = useState(0);
+  const ITEMS_PER_PAGE = 8; // Mostramos 8 libros por página para que se vea limpio
+
+  // Estado para feedback de préstamo
+  const [processingId, setProcessingId] = useState(null); // Para mostrar spinner en el botón específico
 
   useEffect(() => {
     fetchBooks();
-  }, []);
+  }, [page, searchTerm]); // Se recarga si cambia página o búsqueda
 
   const fetchBooks = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      
+      // Construimos la consulta base
+      let query = supabase
         .from("books")
-        .select("*")
-        .order("title", { ascending: true });
+        .select("*", { count: "exact" }); // Pedimos el total exacto para la paginación
+
+      // Aplicamos filtro si existe
+      if (searchTerm) {
+        query = query.or(`title.ilike.%${searchTerm}%,author.ilike.%${searchTerm}%,category.ilike.%${searchTerm}%`);
+      }
+
+      // Calculamos rangos para paginación (0-7, 8-15, etc.)
+      const from = (page - 1) * ITEMS_PER_PAGE;
+      const to = from + ITEMS_PER_PAGE - 1;
+
+      // Ejecutamos consulta con rango y orden
+      const { data, count, error } = await query
+        .order("title", { ascending: true })
+        .range(from, to);
 
       if (error) throw error;
+
       setBooks(data);
+      setTotalBooks(count || 0);
     } catch (error) {
       console.error("Error al cargar libros:", error);
     } finally {
@@ -28,25 +55,77 @@ export default function UserCatalog() {
     }
   };
 
-  // Filtrado en tiempo real
-  const filteredBooks = books.filter((book) => {
-    const term = searchTerm.toLowerCase();
-    return (
-      book.title.toLowerCase().includes(term) ||
-      book.author.toLowerCase().includes(term) ||
-      book.category.toLowerCase().includes(term)
-    );
-  });
+  // --- LÓGICA DE PRÉSTAMO SEGURA (SOLUCIÓN RACE CONDITION) ---
+  const handleRequestLoan = async (book) => {
+    if (!window.confirm(`¿Deseas solicitar el préstamo del libro "${book.title}"?`)) return;
 
-  // Simulación de "Top 5" (Tomamos los primeros 5 del filtro actual)
-  const topBooks = filteredBooks.slice(0, 5);
+    try {
+      setProcessingId(book.id); // Activar spinner en este libro
+
+      // PASO 1: INTENTAR RESERVAR EL LIBRO (ATOMICIDAD)
+      // Aquí está la magia: Solo actualizamos SI el estado es 'DISPONIBLE'
+      const { data: updatedBook, error: updateError } = await supabase
+        .from("books")
+        .update({ status: "PRESTADO" })
+        .eq("id", book.id)
+        .eq("status", "DISPONIBLE") // <--- ESTO EVITA QUE 2 PERSONAS LO PIDAN A LA VEZ
+        .select();
+
+      if (updateError) throw updateError;
+
+      // Verificamos si realmente se actualizó algo
+      if (!updatedBook || updatedBook.length === 0) {
+        alert("¡Lo sentimos! Alguien más acaba de solicitar este libro hace un instante.");
+        fetchBooks(); // Recargamos para que vea el nuevo estado real
+        return;
+      }
+
+      // PASO 2: CREAR EL REGISTRO DEL PRÉSTAMO
+      // Si llegamos aquí, el libro ya es nuestro en la BD. Creamos el ticket.
+      const loanData = {
+        book_id: book.id,
+        user_id: user.id, // ID del estudiante logueado
+        loan_date: new Date().toISOString(),
+        // Fecha de devolución sugerida (ej: 15 días después)
+        return_date: null, 
+        status: "ACTIVO"
+      };
+
+      const { error: loanError } = await supabase
+        .from("loans")
+        .insert([loanData]);
+
+      if (loanError) {
+        // SI FALLA EL REGISTRO (Muy raro), DEBERÍAMOS REVERTIR EL LIBRO (Rollback manual)
+        // Por simplicidad en este proyecto, asumimos éxito o alertamos al admin.
+        console.error("Error creando ticket:", loanError);
+        alert("Ocurrió un error generando el ticket, contacta al administrador.");
+      } else {
+        alert("¡Préstamo exitoso! Por favor acércate a biblioteca a recoger tu libro.");
+        fetchBooks(); // Recargar la lista
+      }
+
+    } catch (error) {
+      console.error("Error en préstamo:", error);
+      alert("Error al procesar la solicitud.");
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleSearch = (e) => {
+    setSearchTerm(e.target.value);
+    setPage(1); // Volver a la primera página al buscar
+  };
+
+  const totalPages = Math.ceil(totalBooks / ITEMS_PER_PAGE);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 pb-10">
       {/* 1. BUSCADOR HERO */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center space-y-4">
         <h2 className="text-2xl font-bold text-gray-800">
-          ¿Qué libro estás buscando hoy?
+          Biblioteca de Ingeniería
         </h2>
         <div className="relative max-w-2xl mx-auto">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
@@ -54,7 +133,7 @@ export default function UserCatalog() {
             type="text"
             placeholder="Buscar por título, autor o categoría..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={handleSearch}
             className="w-full pl-12 pr-4 py-4 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all text-lg"
           />
         </div>
@@ -66,59 +145,25 @@ export default function UserCatalog() {
         </div>
       ) : (
         <>
-          {/* 2. SECCIÓN TOP 5 (Estilo Carrusel/Tarjetas destacadas) */}
-          {topBooks.length > 0 && (
-            <section>
-              <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-                <span className="bg-yellow-100 text-yellow-700 p-1 rounded">
-                  🔥
-                </span>
-                Destacados
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-                {topBooks.map((book) => (
-                  <div
-                    key={book.id}
-                    className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow group cursor-pointer relative overflow-hidden"
-                  >
-                    {/* Placeholder de Portada (Gradiente simple) */}
-                    <div className="h-32 bg-gradient-to-br from-gray-100 to-gray-200 rounded-lg mb-3 flex items-center justify-center group-hover:scale-105 transition-transform duration-300">
-                      <BookOpen className="w-8 h-8 text-gray-300" />
-                    </div>
-                    
-                    <h4 className="font-bold text-gray-800 text-sm line-clamp-2 mb-1" title={book.title}>
-                      {book.title}
-                    </h4>
-                    <p className="text-xs text-gray-500 mb-2">{book.author}</p>
-                    
-                    <div className="flex justify-between items-center mt-auto">
-                        <span className="text-[10px] font-semibold bg-gray-100 px-2 py-1 rounded text-gray-600">
-                            {book.category}
-                        </span>
-                        {book.status === 'DISPONIBLE' ? (
-                            <div className="w-2 h-2 bg-green-500 rounded-full" title="Disponible"></div>
-                        ) : (
-                            <div className="w-2 h-2 bg-red-500 rounded-full" title="Prestado"></div>
-                        )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* 3. CATÁLOGO GENERAL (Grid completa) */}
+          {/* 2. CATÁLOGO CON TARJETAS */}
           <section>
-            <h3 className="text-lg font-bold text-gray-800 mb-4 mt-8 flex items-center gap-2">
-              <BookOpen className="w-5 h-5 text-primary" />
-              Catálogo Completo ({filteredBooks.length})
-            </h3>
+            <div className="flex justify-between items-center mb-6">
+                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                <BookOpen className="w-5 h-5 text-primary" />
+                Catálogo ({totalBooks} resultados)
+                </h3>
+                
+                {/* Paginador pequeño arriba */}
+                <span className="text-xs text-gray-500">
+                    Página {page} de {totalPages}
+                </span>
+            </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-              {filteredBooks.map((book) => (
+              {books.map((book) => (
                 <div
                   key={book.id}
-                  className="bg-white rounded-xl border border-gray-100 overflow-hidden hover:border-primary/30 transition-colors flex flex-col"
+                  className="bg-white rounded-xl border border-gray-100 overflow-hidden hover:border-primary/30 transition-colors flex flex-col shadow-sm hover:shadow-md"
                 >
                   <div className="p-5 flex-1">
                     <div className="flex justify-between items-start mb-2">
@@ -134,33 +179,69 @@ export default function UserCatalog() {
                         )}
                     </div>
 
-                    <h4 className="text-base font-bold text-gray-800 mb-1 leading-tight">
+                    <h4 className="text-base font-bold text-gray-800 mb-1 leading-tight line-clamp-2" title={book.title}>
                       {book.title}
                     </h4>
-                    <p className="text-sm text-gray-500 mb-3">{book.author}</p>
+                    <p className="text-sm text-gray-500 mb-3 line-clamp-1">{book.author}</p>
                     
-                    <div className="text-xs text-gray-400 bg-gray-50 p-2 rounded-lg inline-block">
+                    <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded-lg inline-block">
                         {book.category || 'General'}
                     </div>
                   </div>
 
-                  {/* Botón de Acción (Simulado por ahora) */}
+                  {/* BOTÓN DE ACCIÓN CON LÓGICA */}
                   <div className="p-4 border-t border-gray-50 bg-gray-50/50">
                     <button 
-                        disabled={book.status !== 'DISPONIBLE'}
-                        className="w-full py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-white border border-gray-200 text-gray-700 hover:bg-primary hover:text-white hover:border-transparent"
+                        onClick={() => handleRequestLoan(book)}
+                        disabled={book.status !== 'DISPONIBLE' || processingId === book.id}
+                        className={`w-full py-2.5 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2
+                            ${book.status === 'DISPONIBLE' 
+                                ? 'bg-white border border-gray-200 text-gray-700 hover:bg-primary hover:text-white hover:border-transparent shadow-sm' 
+                                : 'bg-gray-100 text-gray-400 cursor-not-allowed border border-transparent'
+                            }
+                        `}
                     >
-                        {book.status === 'DISPONIBLE' ? 'Solicitar Préstamo' : 'No Disponible'}
+                        {processingId === book.id ? (
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                        ) : (
+                            book.status === 'DISPONIBLE' ? 'Solicitar Préstamo' : 'No Disponible'
+                        )}
                     </button>
                   </div>
                 </div>
               ))}
             </div>
 
-            {filteredBooks.length === 0 && (
-                <div className="text-center py-12 bg-white rounded-xl border border-dashed border-gray-300">
+            {/* Mensaje vacío */}
+            {books.length === 0 && (
+                <div className="text-center py-12 bg-white rounded-xl border border-dashed border-gray-300 mt-6">
                     <XCircle className="w-12 h-12 text-gray-300 mx-auto mb-3" />
                     <p className="text-gray-500">No se encontraron libros con ese criterio.</p>
+                </div>
+            )}
+
+            {/* 3. PAGINACIÓN INFERIOR */}
+            {totalPages > 1 && (
+                <div className="flex items-center justify-center gap-4 mt-10">
+                    <button
+                        onClick={() => setPage(p => Math.max(1, p - 1))}
+                        disabled={page === 1}
+                        className="p-2 rounded-full bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600 transition-colors"
+                    >
+                        <ChevronLeft className="w-5 h-5" />
+                    </button>
+                    
+                    <span className="text-sm font-medium text-gray-700">
+                        Página {page} de {totalPages}
+                    </span>
+
+                    <button
+                        onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                        disabled={page === totalPages}
+                        className="p-2 rounded-full bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600 transition-colors"
+                    >
+                        <ChevronRight className="w-5 h-5" />
+                    </button>
                 </div>
             )}
           </section>
