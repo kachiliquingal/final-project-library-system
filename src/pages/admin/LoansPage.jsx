@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../api/supabaseClient";
+import { useRealtime } from "../../hooks/useRealtime"; // <--- 1. IMPORTAR HOOK
 import {
   Search,
-  Calendar,
   BookOpen,
   User,
   CheckCircle,
@@ -20,10 +20,19 @@ export default function LoansPage() {
     fetchLoans();
   }, [filter]);
 
-  const fetchLoans = async () => {
-    setLoading(true);
+  // 🔴 2. IMPLEMENTACIÓN REALTIME
+  // Escuchamos la tabla 'loans'. Si hay cambios (nuevos préstamos o devoluciones),
+  // recargamos los datos silenciosamente (sin spinner) para traer los nombres y títulos actualizados.
+  useRealtime("loans", () => {
+    console.log("⚡ Cambio en tabla Loans detectado -> Recargando lista...");
+    fetchLoans(false); // false = No mostrar loading
+  });
+
+  // Modificamos la función para aceptar el parámetro 'showLoading'
+  const fetchLoans = async (showLoading = true) => {
+    if (showLoading) setLoading(true);
+
     try {
-      // Unimos las 3 tablas: loans -> books, loans -> profiles
       let query = supabase
         .from("loans")
         .select(
@@ -57,6 +66,8 @@ export default function LoansPage() {
     if (!window.confirm("¿Confirmar la devolución de este libro?")) return;
 
     try {
+      // Nota: Al hacer este update, el Realtime se disparará solo y actualizará la tabla.
+      // Pero dejamos el fetchLoans aquí por si acaso el realtime tarda un milisegundo.
       const { error } = await supabase
         .from("loans")
         .update({
@@ -66,7 +77,7 @@ export default function LoansPage() {
         .eq("id", loanId);
 
       if (error) throw error;
-      fetchLoans(); // Recargar tabla
+      // fetchLoans(); // Ya no es estrictamente necesario porque useRealtime lo hará, pero no estorba.
     } catch (error) {
       alert("Error al procesar la devolución");
     }
@@ -144,7 +155,10 @@ export default function LoansPage() {
                     colSpan="6"
                     className="px-6 py-10 text-center text-gray-400"
                   >
-                    Cargando historial...
+                    <div className="flex items-center justify-center gap-2">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                      Cargando historial...
+                    </div>
                   </td>
                 </tr>
               ) : filteredLoans.length > 0 ? (
