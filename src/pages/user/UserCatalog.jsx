@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../api/supabaseClient";
-import { useAuth } from "../../context/AuthContext"; // Necesitamos el usuario para el préstamo
+import { useAuth } from "../../context/AuthContext"; 
 import { Search, BookOpen, Clock, CheckCircle, XCircle, ChevronLeft, ChevronRight } from "lucide-react";
 
 export default function UserCatalog() {
@@ -12,34 +12,61 @@ export default function UserCatalog() {
   const [searchTerm, setSearchTerm] = useState("");
   const [page, setPage] = useState(1);
   const [totalBooks, setTotalBooks] = useState(0);
-  const ITEMS_PER_PAGE = 8; // Mostramos 8 libros por página para que se vea limpio
+  const ITEMS_PER_PAGE = 8; 
 
-  // Estado para feedback de préstamo
-  const [processingId, setProcessingId] = useState(null); // Para mostrar spinner en el botón específico
+  const [processingId, setProcessingId] = useState(null); 
 
   useEffect(() => {
     fetchBooks();
-  }, [page, searchTerm]); // Se recarga si cambia página o búsqueda
+
+    // 🔴 1. INICIO DE REALTIME: Escuchar cambios en la tabla 'books'
+    const channel = supabase
+      .channel('catalog-changes') // Nombre cualquiera para el canal
+      .on(
+        'postgres_changes', // Tipo de evento: Cambios en Postgres
+        {
+          event: 'UPDATE',  // Solo nos importan las actualizaciones (cambio de estado)
+          schema: 'public',
+          table: 'books',   // Tabla específica
+        },
+        (payload) => {
+          // payload.new trae el libro ya actualizado (ej: status = 'PRESTADO')
+          const updatedBook = payload.new;
+          
+          // Actualizamos nuestro estado local instantáneamente
+          setBooks((prevBooks) => 
+            prevBooks.map((book) => 
+              book.id === updatedBook.id 
+                ? { ...book, ...updatedBook } // Fusionamos los datos nuevos
+                : book
+            )
+          );
+        }
+      )
+      .subscribe();
+
+    // 🔴 2. LIMPIEZA: Desuscribirse cuando el usuario salga de la página
+    return () => {
+      supabase.removeChannel(channel);
+    };
+
+  }, [page, searchTerm]); // Se reinicia si cambiamos de página
 
   const fetchBooks = async () => {
     try {
       setLoading(true);
       
-      // Construimos la consulta base
       let query = supabase
         .from("books")
-        .select("*", { count: "exact" }); // Pedimos el total exacto para la paginación
+        .select("*", { count: "exact" }); 
 
-      // Aplicamos filtro si existe
       if (searchTerm) {
         query = query.or(`title.ilike.%${searchTerm}%,author.ilike.%${searchTerm}%,category.ilike.%${searchTerm}%`);
       }
 
-      // Calculamos rangos para paginación (0-7, 8-15, etc.)
       const from = (page - 1) * ITEMS_PER_PAGE;
       const to = from + ITEMS_PER_PAGE - 1;
 
-      // Ejecutamos consulta con rango y orden
       const { data, count, error } = await query
         .order("title", { ascending: true })
         .range(from, to);
@@ -55,38 +82,33 @@ export default function UserCatalog() {
     }
   };
 
-  // --- LÓGICA DE PRÉSTAMO SEGURA (SOLUCIÓN RACE CONDITION) ---
   const handleRequestLoan = async (book) => {
     if (!window.confirm(`¿Deseas solicitar el préstamo del libro "${book.title}"?`)) return;
 
     try {
-      setProcessingId(book.id); // Activar spinner en este libro
+      setProcessingId(book.id); 
 
-      // PASO 1: INTENTAR RESERVAR EL LIBRO (ATOMICIDAD)
-      // Aquí está la magia: Solo actualizamos SI el estado es 'DISPONIBLE'
+      // 1. Bloqueo Optimista
       const { data: updatedBook, error: updateError } = await supabase
         .from("books")
         .update({ status: "PRESTADO" })
         .eq("id", book.id)
-        .eq("status", "DISPONIBLE") // <--- ESTO EVITA QUE 2 PERSONAS LO PIDAN A LA VEZ
+        .eq("status", "DISPONIBLE") 
         .select();
 
       if (updateError) throw updateError;
 
-      // Verificamos si realmente se actualizó algo
       if (!updatedBook || updatedBook.length === 0) {
         alert("¡Lo sentimos! Alguien más acaba de solicitar este libro hace un instante.");
-        fetchBooks(); // Recargamos para que vea el nuevo estado real
+        fetchBooks(); 
         return;
       }
 
-      // PASO 2: CREAR EL REGISTRO DEL PRÉSTAMO
-      // Si llegamos aquí, el libro ya es nuestro en la BD. Creamos el ticket.
+      // 2. Crear Ticket
       const loanData = {
         book_id: book.id,
-        user_id: user.id, // ID del estudiante logueado
+        user_id: user.id, 
         loan_date: new Date().toISOString(),
-        // Fecha de devolución sugerida (ej: 15 días después)
         return_date: null, 
         status: "ACTIVO"
       };
@@ -96,13 +118,13 @@ export default function UserCatalog() {
         .insert([loanData]);
 
       if (loanError) {
-        // SI FALLA EL REGISTRO (Muy raro), DEBERÍAMOS REVERTIR EL LIBRO (Rollback manual)
-        // Por simplicidad en este proyecto, asumimos éxito o alertamos al admin.
         console.error("Error creando ticket:", loanError);
         alert("Ocurrió un error generando el ticket, contacta al administrador.");
       } else {
         alert("¡Préstamo exitoso! Por favor acércate a biblioteca a recoger tu libro.");
-        fetchBooks(); // Recargar la lista
+        // NOTA: Ya no es estrictamente necesario llamar a fetchBooks() aquí
+        // porque el Realtime actualizará la UI solo, pero lo dejamos por seguridad.
+        fetchBooks(); 
       }
 
     } catch (error) {
@@ -115,7 +137,7 @@ export default function UserCatalog() {
 
   const handleSearch = (e) => {
     setSearchTerm(e.target.value);
-    setPage(1); // Volver a la primera página al buscar
+    setPage(1); 
   };
 
   const totalPages = Math.ceil(totalBooks / ITEMS_PER_PAGE);
@@ -153,7 +175,6 @@ export default function UserCatalog() {
                 Catálogo ({totalBooks} resultados)
                 </h3>
                 
-                {/* Paginador pequeño arriba */}
                 <span className="text-xs text-gray-500">
                     Página {page} de {totalPages}
                 </span>
@@ -212,7 +233,6 @@ export default function UserCatalog() {
               ))}
             </div>
 
-            {/* Mensaje vacío */}
             {books.length === 0 && (
                 <div className="text-center py-12 bg-white rounded-xl border border-dashed border-gray-300 mt-6">
                     <XCircle className="w-12 h-12 text-gray-300 mx-auto mb-3" />
