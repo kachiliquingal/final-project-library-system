@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../api/supabaseClient";
+import { useRealtime } from "../../hooks/useRealtime"; // <--- 1. IMPORTAMOS EL HOOK
 import {
   BarChart,
   Bar,
@@ -8,13 +9,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import {
-  BookOpen,
-  ClipboardList,
-  CheckSquare,
-  Calendar,
-  Users,
-} from "lucide-react";
+import { BookOpen, ClipboardList, CheckSquare, Users } from "lucide-react";
 
 export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
@@ -32,28 +27,48 @@ export default function AdminDashboard() {
     fetchDashboardData();
   }, []);
 
+  // 🔴 2. IMPLEMENTACIÓN DE REALTIME (LAS 3 ANTENAS)
+  // Si cambia algo en préstamos (alguien pide/devuelve), actualizamos todo
+  useRealtime("loans", () => {
+    console.log("⚡ Cambio en Préstamos detectado");
+    fetchDashboardData();
+  });
+
+  // Si cambia algo en libros (nuevo libro/borrado), actualizamos
+  useRealtime("books", () => {
+    console.log("⚡ Cambio en Libros detectado");
+    fetchDashboardData();
+  });
+
+  // Si cambia algo en perfiles (nuevo usuario), actualizamos
+  useRealtime("profiles", () => {
+    console.log("⚡ Cambio en Usuarios detectado");
+    fetchDashboardData();
+  });
+
   const fetchDashboardData = async () => {
     try {
-      setLoading(true);
+      // Solo mostramos el spinner si es la primera carga (evita parpadeos en realtime)
+      // Si ya tenemos datos, la actualización ocurre "por detrás"
+      if (!stats.totalBooks && !stats.totalUsers) setLoading(true);
 
-      // 1. TOTAL DE LIBROS (Tabla: public.books)
+      // 1. TOTAL DE LIBROS
       const { count: booksCount } = await supabase
         .from("books")
         .select("*", { count: "exact", head: true });
 
-      // 2. TOTAL DE USUARIOS (Tabla: public.profiles)
+      // 2. TOTAL DE USUARIOS
       const { count: usersCount } = await supabase
         .from("profiles")
         .select("*", { count: "exact", head: true });
 
-      // 3. PRÉSTAMOS ACTIVOS (Tabla: public.loans, Estado: 'ACTIVO')
-      // ¡IMPORTANTE! Aquí corregí el estado a mayúsculas según tu script SQL
+      // 3. PRÉSTAMOS ACTIVOS
       const { count: loansCount } = await supabase
         .from("loans")
         .select("*", { count: "exact", head: true })
         .eq("status", "ACTIVO");
 
-      // Cálculo de disponibles (Total Libros - Préstamos Activos)
+      // Cálculo de disponibles
       const available = (booksCount || 0) - (loansCount || 0);
 
       setStats({
@@ -64,7 +79,6 @@ export default function AdminDashboard() {
       });
 
       // 4. DATOS PARA GRÁFICAS Y TOP 5
-      // Traemos loans y hacemos join con books para saber el título
       const { data: loansData, error } = await supabase
         .from("loans")
         .select(
@@ -89,7 +103,7 @@ export default function AdminDashboard() {
     }
   };
 
-  // Procesar datos para la Gráfica (Préstamos por día de la semana)
+  // Procesar datos para la Gráfica
   const processChartData = (loans) => {
     const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const counts = { Sun: 0, Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0 };
@@ -109,13 +123,11 @@ export default function AdminDashboard() {
     setChartData(formattedData);
   };
 
-  // Procesar datos para Top 5 Libros más pedidos
+  // Procesar datos para Top 5
   const processTopBooks = (loans) => {
     const bookCounts = {};
 
     loans.forEach((loan) => {
-      // Accedemos a la relación 'books' definida en tu esquema
-      // Si el libro fue borrado, ponemos "Desconocido"
       const title = loan.books?.title || "Libro Desconocido";
       const author = loan.books?.author || "Autor Desconocido";
 
@@ -125,7 +137,6 @@ export default function AdminDashboard() {
       bookCounts[title].count++;
     });
 
-    // Ordenar y tomar top 5
     const sorted = Object.values(bookCounts)
       .sort((a, b) => b.count - a.count)
       .slice(0, 5)
@@ -134,7 +145,6 @@ export default function AdminDashboard() {
     setTopBooks(sorted);
   };
 
-  // Tarjetas configuradas según tu Wireframe
   const statCards = [
     {
       label: "Total Libros",
@@ -176,7 +186,7 @@ export default function AdminDashboard() {
 
   return (
     <div className="space-y-6">
-      {/* 1. TARJETAS DE ESTADÍSTICAS (Diseño Wireframe) */}
+      {/* 1. TARJETAS DE ESTADÍSTICAS */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {statCards.map((stat, index) => (
           <div
@@ -200,7 +210,7 @@ export default function AdminDashboard() {
 
       {/* 2. SECCIÓN PRINCIPAL: GRÁFICA Y TOP 5 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* GRÁFICA (IZQUIERDA - 2 COLUMNAS) */}
+        {/* GRÁFICA */}
         <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
           <h3 className="text-lg font-bold text-gray-800 mb-6">
             Préstamos por Día de la Semana
@@ -239,7 +249,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* LISTA TOP 5 (DERECHA - 1 COLUMNA) */}
+        {/* LISTA TOP 5 */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
           <h3 className="text-lg font-bold text-gray-800 mb-6">
             Top 5 Libros Solicitados
