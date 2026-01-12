@@ -1,74 +1,64 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../api/supabaseClient";
+import { useRealtime } from "../../hooks/useRealtime"; // <--- 1. IMPORTAMOS TU CUSTOM HOOK
 import { Search, Plus, Edit, Trash2, BookOpen } from "lucide-react";
 
 export default function InventoryPage() {
   const [books, setBooks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
-  const [filterStatus, setFilterStatus] = useState("ALL"); // ALL, DISPONIBLE, PRESTADO
+  const [filterStatus, setFilterStatus] = useState("ALL");
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const ITEMS_PER_PAGE = 10;
 
+  // Carga inicial y recarga si cambian filtros
   useEffect(() => {
     fetchBooks();
+  }, [page, filterStatus, searchTerm]);
 
-    // 🔴 1. INICIO DE REALTIME (LA ANTENA PARA EL ADMIN)
-    // Esto permite que el Admin vea cambios (como préstamos) al instante
-    const channel = supabase
-      .channel("admin-inventory-changes")
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE", // Escuchamos actualizaciones (ej: cambio de estado)
-          schema: "public",
-          table: "books",
-        },
-        (payload) => {
-          // payload.new trae el libro actualizado
-          const updatedBook = payload.new;
-
-          // Actualizamos la tabla localmente sin recargar
-          setBooks((prevBooks) =>
-            prevBooks.map((book) =>
-              book.id === updatedBook.id ? { ...book, ...updatedBook } : book
-            )
-          );
-        }
-      )
-      .subscribe();
-
-    // 🔴 2. LIMPIEZA
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [page, filterStatus, searchTerm]); // Se reinicia si cambian los filtros
+  // 🔴 2. IMPLEMENTACIÓN DEL CUSTOM HOOK
+  // Mira qué limpio queda: "Escucha la tabla 'books' y ejecuta esto cuando cambie"
+  useRealtime("books", (payload) => {
+    // Si es un UPDATE (alguien pidió un libro), actualizamos solo esa fila localmente
+    if (payload.eventType === "UPDATE") {
+      const updatedBook = payload.new;
+      setBooks((prevBooks) =>
+        prevBooks.map((book) =>
+          book.id === updatedBook.id ? { ...book, ...updatedBook } : book
+        )
+      );
+    }
+    // Si es INSERT o DELETE, lo mejor es recargar la tabla para ajustar paginación
+    else {
+      fetchBooks();
+    }
+  });
 
   const fetchBooks = async () => {
-    setLoading(true);
+    // Nota: Quitamos setLoading(true) aquí para que no parpadee si recargamos por realtime
+    // Solo mostramos loading la primera vez o si cambiamos filtros manualmente
+    if (books.length === 0) setLoading(true);
+
     try {
       let query = supabase.from("books").select("*", { count: "exact" });
 
-      // 1. Filtro por Búsqueda (Título o Autor)
       if (searchTerm) {
         query = query.or(
           `title.ilike.%${searchTerm}%,author.ilike.%${searchTerm}%`
         );
       }
 
-      // 2. Filtro por Estado
       if (filterStatus !== "ALL") {
         query = query.eq("status", filterStatus);
       }
 
-      // 3. Paginación
       const from = (page - 1) * ITEMS_PER_PAGE;
       const to = from + ITEMS_PER_PAGE - 1;
 
       const { data, count, error } = await query
         .range(from, to)
-        .order("id", { ascending: true }); // Ordenar por ID
+        .order("id", { ascending: true });
 
       if (error) throw error;
 
@@ -81,17 +71,15 @@ export default function InventoryPage() {
     }
   };
 
-  // Manejo de cambio en buscador (con debounce manual simple)
   const handleSearch = (e) => {
     setSearchTerm(e.target.value);
-    setPage(1); // Resetear a página 1 al buscar
+    setPage(1);
   };
 
   return (
     <div className="space-y-6">
       {/* 1. ENCABEZADO Y CONTROLES */}
       <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-        {/* Buscador */}
         <div className="relative w-full md:w-96">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
@@ -103,7 +91,6 @@ export default function InventoryPage() {
           />
         </div>
 
-        {/* Filtros y Botón Nuevo */}
         <div className="flex gap-3 w-full md:w-auto">
           <select
             value={filterStatus}
