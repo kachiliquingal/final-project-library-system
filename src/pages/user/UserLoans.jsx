@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { supabase } from "../../api/supabaseClient";
 import { useAuth } from "../../context/AuthContext";
-import { useRealtime } from "../../hooks/useRealtime"; // <--- 1. IMPORTAR HOOK
+import { useRealtime } from "../../hooks/useRealtime";
+import { useQuery, useQueryClient } from "@tanstack/react-query"; // <--- 1. Importamos TanStack
 import {
   Clock,
   Calendar,
@@ -12,31 +13,24 @@ import {
 
 export default function UserLoans() {
   const { user } = useAuth();
-  const [loans, setLoans] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("active"); // 'active' | 'history'
 
-  useEffect(() => {
-    if (user) fetchMyLoans();
-  }, [user]);
+  // Cliente para controlar la caché manualmente
+  const queryClient = useQueryClient();
 
-  // 🔴 2. IMPLEMENTACIÓN REALTIME
-  // Si algo cambia en la tabla de préstamos (ej: Admin devuelve el libro),
-  // verificamos si es mi préstamo y recargamos.
-  useRealtime("loans", (payload) => {
-    // Optimización: Solo recargamos si el cambio tiene mi ID de usuario
-    const changedUserId = payload.new?.user_id || payload.old?.user_id;
+  // 🔴 2. USEQUERY: Reemplaza a tu useEffect y useState de loans
+  const {
+    data: loans = [],
+    isLoading,
+    isError,
+    error,
+  } = useQuery({
+    // La clave única de la caché. Si cambia el usuario, cambian los datos.
+    queryKey: ["my-loans", user?.id],
 
-    if (changedUserId === user.id) {
-      console.log("⚡ Cambio en mis préstamos detectado -> Actualizando...");
-      fetchMyLoans(false); // Recarga silenciosa
-    }
-  });
-
-  // Modificamos para aceptar showLoading (por defecto true)
-  const fetchMyLoans = async (showLoading = true) => {
-    try {
-      if (showLoading) setLoading(true);
+    queryFn: async () => {
+      if (!user) return [];
+      console.log("📡 Cargando mis préstamos desde Supabase...");
 
       const { data, error } = await supabase
         .from("loans")
@@ -54,13 +48,28 @@ export default function UserLoans() {
         .order("loan_date", { ascending: false });
 
       if (error) throw error;
-      setLoans(data);
-    } catch (error) {
-      console.error("Error cargando mis préstamos:", error);
-    } finally {
-      setLoading(false);
+      return data;
+    },
+    // Solo se ejecuta si hay usuario
+    enabled: !!user,
+    // ¡IMPORTANTE! NO ponemos staleTime.
+    // Por defecto es 0, lo que significa que siempre verificará datos nuevos.
+    // Esto asegura la actualización INMEDIATA que necesitas para el ingeniero.
+  });
+
+  // 🔴 3. REALTIME: Tu lógica original adaptada a TanStack
+  useRealtime("loans", (payload) => {
+    // Mantenemos tu optimización: Solo si el cambio es mío
+    const changedUserId = payload.new?.user_id || payload.old?.user_id;
+
+    if (changedUserId === user?.id) {
+      console.log(
+        "⚡ Cambio en mis préstamos detectado -> Actualizando caché INMEDIATAMENTE..."
+      );
+      // Esto fuerza a TanStack a volver a pedir los datos en ese preciso instante
+      queryClient.invalidateQueries({ queryKey: ["my-loans", user.id] });
     }
-  };
+  });
 
   const formatDate = (dateString) => {
     if (!dateString) return "Pendiente";
@@ -71,11 +80,21 @@ export default function UserLoans() {
     });
   };
 
-  // Filtrar préstamos según la pestaña
+  // Filtrado local (Igual que tenías)
   const activeLoans = loans.filter((loan) => loan.status === "ACTIVO");
   const historyLoans = loans.filter((loan) => loan.status !== "ACTIVO");
-
   const displayLoans = activeTab === "active" ? activeLoans : historyLoans;
+
+  // Manejo de error visual
+  if (isError) {
+    return (
+      <div className="p-8 text-center text-red-500 bg-red-50 rounded-xl border border-red-100 max-w-5xl mx-auto mt-10">
+        <AlertCircle className="w-10 h-10 mx-auto mb-2 opacity-50" />
+        <h3 className="font-bold">Error cargando tus préstamos</h3>
+        <p className="text-sm">{error.message}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 max-w-5xl mx-auto">
@@ -137,7 +156,7 @@ export default function UserLoans() {
       </div>
 
       {/* 3. LISTA DE PRÉSTAMOS */}
-      {loading ? (
+      {isLoading ? ( // Usamos isLoading de TanStack
         <div className="flex justify-center py-20">
           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div>
         </div>
