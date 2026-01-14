@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { supabase } from "../../api/supabaseClient";
-import { useRealtime } from "../../hooks/useRealtime"; // <--- 1. IMPORTAR HOOK
+import { useRealtime } from "../../hooks/useRealtime";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"; // <--- 1. NUEVOS IMPORTS
 import {
   Search,
   BookOpen,
@@ -8,31 +9,26 @@ import {
   CheckCircle,
   Clock,
   RotateCcw,
+  AlertCircle,
 } from "lucide-react";
 
 export default function LoansPage() {
-  const [loans, setLoans] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [filter, setFilter] = useState("ALL"); // ALL, ACTIVO, DEVUELTO
 
-  useEffect(() => {
-    fetchLoans();
-  }, [filter]);
+  // Acceso al cliente para invalidar caché
+  const queryClient = useQueryClient();
 
-  // 🔴 2. IMPLEMENTACIÓN REALTIME
-  // Escuchamos la tabla 'loans'. Si hay cambios (nuevos préstamos o devoluciones),
-  // recargamos los datos silenciosamente (sin spinner) para traer los nombres y títulos actualizados.
-  useRealtime("loans", () => {
-    console.log("⚡ Cambio en tabla Loans detectado -> Recargando lista...");
-    fetchLoans(false); // false = No mostrar loading
-  });
-
-  // Modificamos la función para aceptar el parámetro 'showLoading'
-  const fetchLoans = async (showLoading = true) => {
-    if (showLoading) setLoading(true);
-
-    try {
+  // 🔴 2. USEQUERY: Carga de datos inteligente
+  const {
+    data: loans = [],
+    isLoading,
+    isError,
+    error,
+  } = useQuery({
+    queryKey: ["loans", filter], // Si cambia el filtro, TanStack busca nuevos datos
+    queryFn: async () => {
+      console.log("📡 Buscando préstamos en Supabase...");
       let query = supabase
         .from("loans")
         .select(
@@ -52,22 +48,16 @@ export default function LoansPage() {
       }
 
       const { data, error } = await query;
-
       if (error) throw error;
-      setLoans(data);
-    } catch (error) {
-      console.error("Error cargando préstamos:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+      return data;
+    },
+    staleTime: 1000 * 60, // Datos frescos por 1 minuto
+  });
 
-  const handleReturnBook = async (loanId) => {
-    if (!window.confirm("¿Confirmar la devolución de este libro?")) return;
-
-    try {
-      // Nota: Al hacer este update, el Realtime se disparará solo y actualizará la tabla.
-      // Pero dejamos el fetchLoans aquí por si acaso el realtime tarda un milisegundo.
+  // 🔴 3. USEMUTATION: Para manejar la devolución (Optimistic Update)
+  // Esto es un extra genial: Si devuelves un libro sin internet, TanStack lo intentará después.
+  const returnMutation = useMutation({
+    mutationFn: async (loanId) => {
       const { error } = await supabase
         .from("loans")
         .update({
@@ -77,13 +67,29 @@ export default function LoansPage() {
         .eq("id", loanId);
 
       if (error) throw error;
-      // fetchLoans(); // Ya no es estrictamente necesario porque useRealtime lo hará, pero no estorba.
-    } catch (error) {
-      alert("Error al procesar la devolución");
-    }
+    },
+    // Cuando termine con éxito, invalidamos para refrescar la lista
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["loans"] });
+      // Aquí también invalidamos 'books' (Inventario) porque el libro ahora está disponible
+      queryClient.invalidateQueries({ queryKey: ["books"] });
+    },
+  });
+
+  // 🔴 4. REALTIME: Sigue vivo y coleando
+  useRealtime("loans", () => {
+    console.log(
+      "⚡ Cambio en Loans detectado por Realtime -> Invalidando caché"
+    );
+    queryClient.invalidateQueries({ queryKey: ["loans"] });
+  });
+
+  const handleReturnBook = async (loanId) => {
+    if (!window.confirm("¿Confirmar la devolución de este libro?")) return;
+    returnMutation.mutate(loanId);
   };
 
-  // Filtrado local para el buscador
+  // Filtrado local para el buscador (Frontend)
   const filteredLoans = loans.filter((loan) => {
     if (!searchTerm) return true;
     const searchLower = searchTerm.toLowerCase();
@@ -100,6 +106,16 @@ export default function LoansPage() {
       day: "numeric",
     });
   };
+
+  if (isError) {
+    return (
+      <div className="p-8 text-center text-red-500 bg-red-50 rounded-xl border border-red-100">
+        <AlertCircle className="w-10 h-10 mx-auto mb-2 opacity-50" />
+        <h3 className="font-bold">Error cargando préstamos</h3>
+        <p className="text-sm">{error.message}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -149,7 +165,7 @@ export default function LoansPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {loading ? (
+              {isLoading ? (
                 <tr>
                   <td
                     colSpan="6"
@@ -219,9 +235,14 @@ export default function LoansPage() {
                       {loan.status === "ACTIVO" && (
                         <button
                           onClick={() => handleReturnBook(loan.id)}
-                          className="text-xs bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-3 py-1 rounded-md transition-colors shadow-sm flex items-center gap-1 ml-auto"
+                          disabled={returnMutation.isLoading} // Bloqueamos si se está procesando
+                          className="text-xs bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-3 py-1 rounded-md transition-colors shadow-sm flex items-center gap-1 ml-auto disabled:opacity-50"
                         >
-                          <RotateCcw className="w-3 h-3" />
+                          {returnMutation.isLoading ? (
+                            <div className="animate-spin h-3 w-3 border-b-2 border-gray-600 rounded-full"></div>
+                          ) : (
+                            <RotateCcw className="w-3 h-3" />
+                          )}
                           Devolver
                         </button>
                       )}
