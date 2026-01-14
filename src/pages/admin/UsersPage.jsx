@@ -6,7 +6,6 @@ export default function UsersPage() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
-  // Estado para controlar qué avatares han fallado al cargar
   const [imageErrors, setImageErrors] = useState({});
 
   useEffect(() => {
@@ -47,7 +46,6 @@ export default function UsersPage() {
     });
   };
 
-  // Manejador de errores de imagen
   const handleImageError = (userId) => {
     setImageErrors((prev) => ({ ...prev, [userId]: true }));
   };
