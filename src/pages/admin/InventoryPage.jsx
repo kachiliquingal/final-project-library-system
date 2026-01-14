@@ -1,46 +1,40 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { supabase } from "../../api/supabaseClient";
-import { useRealtime } from "../../hooks/useRealtime"; // <--- 1. IMPORTAMOS TU CUSTOM HOOK
-import { Search, Plus, Edit, Trash2, BookOpen } from "lucide-react";
+import { useRealtime } from "../../hooks/useRealtime";
+import { useQuery, useQueryClient } from "@tanstack/react-query"; // <--- 1. IMPORTACIONES CLAVE
+import {
+  Search,
+  Plus,
+  Edit,
+  Trash2,
+  BookOpen,
+  AlertCircle,
+} from "lucide-react";
 
 export default function InventoryPage() {
-  const [books, setBooks] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
   const ITEMS_PER_PAGE = 10;
 
-  // Carga inicial y recarga si cambian filtros
-  useEffect(() => {
-    fetchBooks();
-  }, [page, filterStatus, searchTerm]);
+  // Acceso al cliente para poder invalidar caché manualmente (para Realtime)
+  const queryClient = useQueryClient();
 
-  // 🔴 2. IMPLEMENTACIÓN DEL CUSTOM HOOK
-  // Mira qué limpio queda: "Escucha la tabla 'books' y ejecuta esto cuando cambie"
-  useRealtime("books", (payload) => {
-    // Si es un UPDATE (alguien pidió un libro), actualizamos solo esa fila localmente
-    if (payload.eventType === "UPDATE") {
-      const updatedBook = payload.new;
-      setBooks((prevBooks) =>
-        prevBooks.map((book) =>
-          book.id === updatedBook.id ? { ...book, ...updatedBook } : book
-        )
-      );
-    }
-    // Si es INSERT o DELETE, lo mejor es recargar la tabla para ajustar paginación
-    else {
-      fetchBooks();
-    }
-  });
+  // 🔴 2. REEMPLAZO DE USEEFFECT POR USEQUERY
+  const {
+    data: queryData, // Aquí viene la respuesta { data, count }
+    isLoading,
+    isError,
+    error,
+  } = useQuery({
+    // La "Key" es como el nombre del archivo en la caché.
+    // Si cambia page, filterStatus o searchTerm, TanStack sabe que debe buscar nuevos datos.
+    queryKey: ["books", page, filterStatus, searchTerm],
 
-  const fetchBooks = async () => {
-    // Nota: Quitamos setLoading(true) aquí para que no parpadee si recargamos por realtime
-    // Solo mostramos loading la primera vez o si cambiamos filtros manualmente
-    if (books.length === 0) setLoading(true);
+    // Esta es la función que busca los datos (tu antigua fetchBooks)
+    queryFn: async () => {
+      console.log("📡 Buscando libros en Supabase...");
 
-    try {
       let query = supabase.from("books").select("*", { count: "exact" });
 
       if (searchTerm) {
@@ -62,23 +56,46 @@ export default function InventoryPage() {
 
       if (error) throw error;
 
-      setBooks(data);
-      setTotalPages(Math.ceil((count || 0) / ITEMS_PER_PAGE));
-    } catch (error) {
-      console.error("Error cargando inventario:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+      // Retornamos un objeto con todo lo necesario
+      return { data, count };
+    },
+    // Opciones extra para mejorar la experiencia offline/cache
+    staleTime: 1000 * 60, // Los datos se consideran "frescos" por 1 minuto
+    keepPreviousData: true, // Mantiene los datos viejos mientras cargan los nuevos (evita parpadeos)
+  });
+
+  // Extraemos los datos de manera segura (si no ha cargado, usamos valores por defecto)
+  const books = queryData?.data || [];
+  const totalCount = queryData?.count || 0;
+  const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE) || 1;
+
+  // 🔴 3. INTEGRACIÓN CON REALTIME
+  useRealtime("books", () => {
+    console.log("⚡ Cambio detectado por Realtime -> Invalidando caché");
+    // En lugar de actualizar el estado manual, le decimos a TanStack:
+    // "Los datos de 'books' están viejos, vuélvelos a pedir cuando puedas"
+    queryClient.invalidateQueries({ queryKey: ["books"] });
+  });
 
   const handleSearch = (e) => {
     setSearchTerm(e.target.value);
     setPage(1);
   };
 
+  // Manejo de errores visual
+  if (isError) {
+    return (
+      <div className="p-8 text-center text-red-500 bg-red-50 rounded-xl border border-red-100">
+        <AlertCircle className="w-10 h-10 mx-auto mb-2 opacity-50" />
+        <h3 className="font-bold">Error cargando inventario</h3>
+        <p className="text-sm">{error.message}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      {/* 1. ENCABEZADO Y CONTROLES */}
+      {/* 1. ENCABEZADO Y CONTROLES (Igual que antes) */}
       <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div className="relative w-full md:w-96">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -127,7 +144,7 @@ export default function InventoryPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {loading ? (
+              {isLoading ? ( // Aquí usamos el isLoading de TanStack
                 <tr>
                   <td
                     colSpan="6"
@@ -218,14 +235,14 @@ export default function InventoryPage() {
           <div className="flex gap-2">
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
+              disabled={page === 1 || isLoading}
               className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600"
             >
               Anterior
             </button>
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
+              disabled={page === totalPages || isLoading}
               className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600"
             >
               Siguiente
