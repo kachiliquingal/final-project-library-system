@@ -1,20 +1,34 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { supabase } from "../../api/supabaseClient";
-import { Search, Mail, Shield, User, Calendar } from "lucide-react";
+import { useRealtime } from "../../hooks/useRealtime"; // <--- 1. Hook de Realtime
+import { useQuery, useQueryClient } from "@tanstack/react-query"; // <--- 2. Hooks de TanStack
+import {
+  Search,
+  Mail,
+  Shield,
+  User,
+  Calendar,
+  AlertCircle,
+} from "lucide-react";
 
 export default function UsersPage() {
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
-  const [imageErrors, setImageErrors] = useState({});
+  const [imageErrors, setImageErrors] = useState({}); // Mantenemos tu lógica de errores de imagen
 
-  useEffect(() => {
-    fetchUsers();
-  }, [searchTerm]);
+  // Cliente para invalidar caché
+  const queryClient = useQueryClient();
 
-  const fetchUsers = async () => {
-    setLoading(true);
-    try {
+  // 🔴 3. USEQUERY: Reemplaza a fetchUsers y useEffect
+  const {
+    data: users = [],
+    isLoading,
+    isError,
+    error,
+  } = useQuery({
+    // La clave incluye 'searchTerm', así que si escribes, busca automáticamente
+    queryKey: ["profiles", searchTerm],
+    queryFn: async () => {
+      console.log("📡 Cargando directorio de usuarios desde Supabase...");
       let query = supabase
         .from("profiles")
         .select("*")
@@ -27,15 +41,17 @@ export default function UsersPage() {
       }
 
       const { data, error } = await query;
-
       if (error) throw error;
-      setUsers(data);
-    } catch (error) {
-      console.error("Error cargando usuarios:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+      return data;
+    },
+    staleTime: 1000 * 60 * 5, // 5 minutos de memoria caché
+  });
+
+  // 🔴 4. REALTIME: Si alguien se registra, refrescamos la lista
+  useRealtime("profiles", () => {
+    console.log("⚡ Cambio en usuarios detectado -> Invalidando caché");
+    queryClient.invalidateQueries({ queryKey: ["profiles"] });
+  });
 
   const formatDate = (dateString) => {
     if (!dateString) return "N/A";
@@ -49,6 +65,17 @@ export default function UsersPage() {
   const handleImageError = (userId) => {
     setImageErrors((prev) => ({ ...prev, [userId]: true }));
   };
+
+  // Manejo visual de errores (Si falla la carga offline o servidor)
+  if (isError) {
+    return (
+      <div className="p-8 text-center text-red-500 bg-red-50 rounded-xl border border-red-100">
+        <AlertCircle className="w-10 h-10 mx-auto mb-2 opacity-50" />
+        <h3 className="font-bold">Error cargando usuarios</h3>
+        <p className="text-sm">{error.message}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -84,7 +111,7 @@ export default function UsersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {loading ? (
+              {isLoading ? ( // Usamos el isLoading de TanStack
                 <tr>
                   <td
                     colSpan="4"
@@ -104,7 +131,7 @@ export default function UsersPage() {
                   >
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
-                        {/* LÓGICA DE AVATAR MEJORADA */}
+                        {/* LÓGICA DE AVATAR MANTENIDA */}
                         <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm overflow-hidden shrink-0 border border-primary/20">
                           {user.avatar_url && !imageErrors[user.id] ? (
                             <img
@@ -112,7 +139,7 @@ export default function UsersPage() {
                               alt="avatar"
                               className="w-full h-full object-cover"
                               onError={() => handleImageError(user.id)}
-                              referrerPolicy="no-referrer" // Ayuda con imágenes de Google
+                              referrerPolicy="no-referrer"
                             />
                           ) : (
                             user.full_name?.charAt(0).toUpperCase() || "U"
