@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect, useRef } from "react";
 import { supabase } from "../api/supabaseClient";
 
 const AuthContext = createContext();
@@ -10,22 +10,59 @@ export const useAuth = () => {
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  
+  // Referencia para evitar re-renderizados innecesarios en actualizaciones de sesión
+  const userRef = useRef(null);
 
   useEffect(() => {
     let mounted = true;
 
+    // 1. Cargar perfil del usuario desde la base de datos
+    const fetchProfile = async (sessionUser) => {
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", sessionUser.id)
+          .single();
+
+        // Ignoramos error PGRST116 (sin resultados) si es un usuario nuevo
+        if (error && error.code !== 'PGRST116') {
+            console.error("Error fetching profile:", error);
+        }
+
+        const userData = {
+          id: sessionUser.id,
+          email: sessionUser.email,
+          role: data?.role || "user",
+          name: data?.full_name || sessionUser.email,
+        };
+
+        if (mounted) {
+          setUser(userData);
+          userRef.current = userData;
+        }
+      } catch (error) {
+        // Fallback seguro en caso de error crítico
+        const basicUser = {
+          id: sessionUser.id,
+          email: sessionUser.email,
+          role: "user",
+          name: sessionUser.email,
+        };
+        if (mounted) {
+            setUser(basicUser);
+            userRef.current = basicUser;
+        }
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    // 2. Verificación Inicial de Sesión
     const initAuth = async () => {
       try {
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Timeout")), 2000)
-        );
-        const sessionPromise = supabase.auth.getSession();
-
-        const {
-          data: { session },
-          error,
-        } = await Promise.race([sessionPromise, timeoutPromise]);
-
+        const { data: { session }, error } = await supabase.auth.getSession();
         if (error) throw error;
 
         if (session && mounted) {
@@ -34,28 +71,33 @@ export const AuthProvider = ({ children }) => {
           setLoading(false);
         }
       } catch (error) {
-        console.warn("Limpiando sesión inestable...", error);
-        localStorage.clear();
-        if (mounted) {
-          setUser(null);
-          setLoading(false);
-        }
+        if (mounted) setLoading(false);
       }
     };
 
     initAuth();
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
+    // 3. Escuchar cambios de estado (Login, Logout, Refresh Token, Cambio de Pestaña)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      
       if (event === "SIGNED_OUT") {
         setUser(null);
+        userRef.current = null;
         setLoading(false);
         localStorage.clear();
-      } else if (session) {
+      } 
+      else if (session) {
+        // OPTIMIZACIÓN CRÍTICA:
+        // Si el usuario ya está cargado en memoria, evitamos recargar el perfil.
+        // Esto previene congelamientos al cambiar de pestaña.
+        if (userRef.current && userRef.current.id === session.user.id) {
+             return; 
+        }
         await fetchProfile(session.user);
-      } else if (!session) {
+      } 
+      else if (!session) {
         setUser(null);
+        userRef.current = null;
         setLoading(false);
       }
     });
@@ -66,31 +108,7 @@ export const AuthProvider = ({ children }) => {
     };
   }, []);
 
-  const fetchProfile = async (authUser) => {
-    try {
-      const { data } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", authUser.id)
-        .single();
-
-      setUser({
-        id: authUser.id,
-        email: authUser.email,
-        role: data?.role || "user",
-        name: data?.full_name || authUser.email,
-      });
-    } catch (error) {
-      setUser({
-        id: authUser.id,
-        email: authUser.email,
-        role: "user",
-        name: authUser.email,
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+  // --- MÉTODOS DE AUTENTICACIÓN ---
 
   const loginWithPassword = async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -125,19 +143,14 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
-    // 1. CRUCIAL! Notify React immediately to change the screen
     setUser(null);
+    userRef.current = null;
     setLoading(false);
-
-    // 2. Clear browser garbage
     localStorage.clear();
-    localStorage.removeItem("sb-agcjuoczilcpdthavaoo-auth-token"); // Ensure specific deletion
-
-    // 3. Notify Supabase (if it fails, it doesn't matter because we've already visually logged you out)
     try {
       await supabase.auth.signOut();
     } catch (error) {
-      console.error("Error al cerrar sesión en servidor:", error);
+      console.error("Error al cerrar sesión:", error);
     }
   };
 
