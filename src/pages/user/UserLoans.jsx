@@ -21,7 +21,7 @@ export default function UserLoans() {
   // 🔴 2. USEQUERY: Reemplaza a tu useEffect y useState de loans
   const {
     data: loans = [],
-    isLoading,
+    isLoading: loading, // Renombramos a 'loading' para no romper tu UI
     isError,
     error,
   } = useQuery({
@@ -52,21 +52,23 @@ export default function UserLoans() {
     },
     // Solo se ejecuta si hay usuario
     enabled: !!user,
-    // ¡IMPORTANTE! NO ponemos staleTime.
-    // Por defecto es 0, lo que significa que siempre verificará datos nuevos.
-    // Esto asegura la actualización INMEDIATA que necesitas para el ingeniero.
+    // ¡IMPORTANTE! staleTime en 0 asegura que los datos siempre se verifiquen
+    // Esto garantiza la actualización INMEDIATA que necesitas.
+    staleTime: 0,
   });
 
-  // 🔴 3. REALTIME: Tu lógica original adaptada a TanStack
+  // 🔴 3. REALTIME: Tu lógica original adaptada para disparar la actualización
   useRealtime("loans", (payload) => {
-    // Mantenemos tu optimización: Solo si el cambio es mío
+    // Tu lógica de optimización original:
     const changedUserId = payload.new?.user_id || payload.old?.user_id;
 
     if (changedUserId === user?.id) {
       console.log(
-        "⚡ Cambio en mis préstamos detectado -> Actualizando caché INMEDIATAMENTE..."
+        "⚡ Cambio en mis préstamos detectado (Realtime) -> Actualizando UI..."
       );
-      // Esto fuerza a TanStack a volver a pedir los datos en ese preciso instante
+
+      // AQUÍ ESTÁ LA CLAVE:
+      // En lugar de fetchMyLoans(false), le decimos a TanStack: "Los datos cambiaron, recárgalos YA".
       queryClient.invalidateQueries({ queryKey: ["my-loans", user.id] });
     }
   });
@@ -80,22 +82,12 @@ export default function UserLoans() {
     });
   };
 
-  // Filtrado local (Igual que tenías)
+  // Filtrado original (intacto)
   const activeLoans = loans.filter((loan) => loan.status === "ACTIVO");
   const historyLoans = loans.filter((loan) => loan.status !== "ACTIVO");
   const displayLoans = activeTab === "active" ? activeLoans : historyLoans;
 
-  // Manejo de error visual
-  if (isError) {
-    return (
-      <div className="p-8 text-center text-red-500 bg-red-50 rounded-xl border border-red-100 max-w-5xl mx-auto mt-10">
-        <AlertCircle className="w-10 h-10 mx-auto mb-2 opacity-50" />
-        <h3 className="font-bold">Error cargando tus préstamos</h3>
-        <p className="text-sm">{error.message}</p>
-      </div>
-    );
-  }
-
+  // Renderizado original
   return (
     <div className="space-y-8 max-w-5xl mx-auto">
       {/* 1. HEADER DE PERFIL */}
@@ -156,9 +148,14 @@ export default function UserLoans() {
       </div>
 
       {/* 3. LISTA DE PRÉSTAMOS */}
-      {isLoading ? ( // Usamos isLoading de TanStack
+      {loading ? (
         <div className="flex justify-center py-20">
           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div>
+        </div>
+      ) : isError ? (
+        // Manejo de error simple
+        <div className="text-center py-10 text-red-500">
+          Error al cargar datos
         </div>
       ) : displayLoans.length > 0 ? (
         <div className="grid gap-4">
