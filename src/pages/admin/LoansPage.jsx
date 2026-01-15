@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { supabase } from "../../api/supabaseClient";
 import { useRealtime } from "../../hooks/useRealtime";
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"; // <--- 1. NUEVOS IMPORTS
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
   Search,
   BookOpen,
@@ -16,17 +16,16 @@ export default function LoansPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filter, setFilter] = useState("ALL"); // ALL, ACTIVO, DEVUELTO
 
-  // Acceso al cliente para invalidar caché
   const queryClient = useQueryClient();
 
-  // 🔴 2. USEQUERY: Carga de datos inteligente
+  // 1. USEQUERY: Carga de préstamos
   const {
     data: loans = [],
     isLoading,
     isError,
     error,
   } = useQuery({
-    queryKey: ["loans", filter], // Si cambia el filtro, TanStack busca nuevos datos
+    queryKey: ["loans", filter],
     queryFn: async () => {
       console.log("📡 Buscando préstamos en Supabase...");
       let query = supabase
@@ -37,6 +36,7 @@ export default function LoansPage() {
           loan_date,
           return_date,
           status,
+          book_id, 
           books ( title, author, category ),
           profiles ( full_name, email )
         `
@@ -51,45 +51,61 @@ export default function LoansPage() {
       if (error) throw error;
       return data;
     },
-    staleTime: 1000 * 60, // Datos frescos por 1 minuto
+    staleTime: 0,
   });
 
-  // 🔴 3. USEMUTATION: Para manejar la devolución (Optimistic Update)
-  // Esto es un extra genial: Si devuelves un libro sin internet, TanStack lo intentará después.
+  // 🔴 2. CORRECCIÓN CRÍTICA AQUÍ: Devolución completa
   const returnMutation = useMutation({
-    mutationFn: async (loanId) => {
-      const { error } = await supabase
+    mutationFn: async (loan) => {
+      // PASO A: Marcar el PRÉSTAMO como DEVUELTO
+      const { error: loanError } = await supabase
         .from("loans")
         .update({
           status: "DEVUELTO",
           return_date: new Date().toISOString(),
         })
-        .eq("id", loanId);
+        .eq("id", loan.id);
 
-      if (error) throw error;
+      if (loanError) throw loanError;
+
+      // PASO B: Marcar el LIBRO como DISPONIBLE (¡Esto faltaba!)
+      // Usamos loan.book_id que viene de la base de datos
+      const { error: bookError } = await supabase
+        .from("books")
+        .update({ status: "DISPONIBLE" })
+        .eq("id", loan.book_id);
+
+      if (bookError) throw bookError;
     },
-    // Cuando termine con éxito, invalidamos para refrescar la lista
     onSuccess: () => {
+      // Recargamos TODO para que se refleje en Inventario y Préstamos
       queryClient.invalidateQueries({ queryKey: ["loans"] });
-      // Aquí también invalidamos 'books' (Inventario) porque el libro ahora está disponible
-      queryClient.invalidateQueries({ queryKey: ["books"] });
+      queryClient.invalidateQueries({ queryKey: ["books"] }); // Actualiza el inventario del Admin
+      queryClient.invalidateQueries({ queryKey: ["catalog"] }); // Actualiza el catálogo del Estudiante
+      alert("Libro devuelto correctamente y puesto en disponibilidad.");
+    },
+    onError: (err) => {
+      alert("Error al devolver el libro: " + err.message);
     },
   });
 
-  // 🔴 4. REALTIME: Sigue vivo y coleando
+  // 3. REALTIME
   useRealtime("loans", () => {
-    console.log(
-      "⚡ Cambio en Loans detectado por Realtime -> Invalidando caché"
-    );
+    console.log("⚡ Cambio en Loans detectado -> Refrescando");
     queryClient.invalidateQueries({ queryKey: ["loans"] });
   });
 
-  const handleReturnBook = async (loanId) => {
-    if (!window.confirm("¿Confirmar la devolución de este libro?")) return;
-    returnMutation.mutate(loanId);
+  const handleReturnBook = async (loan) => {
+    if (
+      !window.confirm(
+        "¿Confirmar la devolución de este libro? Pasará a estar DISPONIBLE."
+      )
+    )
+      return;
+    // Pasamos el OBJETO loan completo, no solo el ID, porque necesitamos el book_id
+    returnMutation.mutate(loan);
   };
 
-  // Filtrado local para el buscador (Frontend)
   const filteredLoans = loans.filter((loan) => {
     if (!searchTerm) return true;
     const searchLower = searchTerm.toLowerCase();
@@ -234,8 +250,8 @@ export default function LoansPage() {
                     <td className="px-6 py-4 text-right">
                       {loan.status === "ACTIVO" && (
                         <button
-                          onClick={() => handleReturnBook(loan.id)}
-                          disabled={returnMutation.isLoading} // Bloqueamos si se está procesando
+                          onClick={() => handleReturnBook(loan)} // PASAMOS TODO EL OBJETO LOAN
+                          disabled={returnMutation.isLoading}
                           className="text-xs bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-3 py-1 rounded-md transition-colors shadow-sm flex items-center gap-1 ml-auto disabled:opacity-50"
                         >
                           {returnMutation.isLoading ? (
