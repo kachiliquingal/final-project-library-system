@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "../../api/supabaseClient";
 import { useRealtime } from "../../hooks/useRealtime";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
@@ -10,15 +10,24 @@ import {
   Clock,
   RotateCcw,
   AlertCircle,
+  ChevronLeft,
+  ChevronRight,
+  ArrowUp, // 🟢 NUEVO: Icono para orden ascendente
+  ArrowDown, // 🟢 NUEVO: Icono para orden descendente
 } from "lucide-react";
 
 export default function LoansPage() {
   const [searchTerm, setSearchTerm] = useState("");
-  const [filter, setFilter] = useState("ALL"); // ALL, ACTIVO, DEVUELTO
+  const [filter, setFilter] = useState("ALL");
+  const [page, setPage] = useState(1);
+
+  // 🟢 NUEVO ESTADO: 'desc' (más reciente primero) o 'asc' (más antiguo primero)
+  const [sortOrder, setSortOrder] = useState("desc");
+
+  const ITEMS_PER_PAGE = 9;
 
   const queryClient = useQueryClient();
 
-  // 1. USEQUERY: Carga de préstamos
   const {
     data: loans = [],
     isLoading,
@@ -41,6 +50,7 @@ export default function LoansPage() {
           profiles ( full_name, email )
         `
         )
+        // Traemos por defecto ordenado por fecha descendente desde la base
         .order("loan_date", { ascending: false });
 
       if (filter !== "ALL") {
@@ -54,10 +64,17 @@ export default function LoansPage() {
     staleTime: 0,
   });
 
-  // 🔴 2. CORRECCIÓN CRÍTICA AQUÍ: Devolución completa
+  useEffect(() => {
+    setPage(1);
+  }, [filter, searchTerm, sortOrder]); // Reseteamos página si cambiamos el orden
+
+  // Función para alternar el orden
+  const toggleSort = () => {
+    setSortOrder((prev) => (prev === "desc" ? "asc" : "desc"));
+  };
+
   const returnMutation = useMutation({
     mutationFn: async (loan) => {
-      // PASO A: Marcar el PRÉSTAMO como DEVUELTO
       const { error: loanError } = await supabase
         .from("loans")
         .update({
@@ -68,8 +85,6 @@ export default function LoansPage() {
 
       if (loanError) throw loanError;
 
-      // PASO B: Marcar el LIBRO como DISPONIBLE (¡Esto faltaba!)
-      // Usamos loan.book_id que viene de la base de datos
       const { error: bookError } = await supabase
         .from("books")
         .update({ status: "DISPONIBLE" })
@@ -78,10 +93,9 @@ export default function LoansPage() {
       if (bookError) throw bookError;
     },
     onSuccess: () => {
-      // Recargamos TODO para que se refleje en Inventario y Préstamos
       queryClient.invalidateQueries({ queryKey: ["loans"] });
-      queryClient.invalidateQueries({ queryKey: ["books"] }); // Actualiza el inventario del Admin
-      queryClient.invalidateQueries({ queryKey: ["catalog"] }); // Actualiza el catálogo del Estudiante
+      queryClient.invalidateQueries({ queryKey: ["books"] });
+      queryClient.invalidateQueries({ queryKey: ["catalog"] });
       alert("Libro devuelto correctamente y puesto en disponibilidad.");
     },
     onError: (err) => {
@@ -89,7 +103,6 @@ export default function LoansPage() {
     },
   });
 
-  // 3. REALTIME
   useRealtime("loans", () => {
     console.log("⚡ Cambio en Loans detectado -> Refrescando");
     queryClient.invalidateQueries({ queryKey: ["loans"] });
@@ -102,10 +115,10 @@ export default function LoansPage() {
       )
     )
       return;
-    // Pasamos el OBJETO loan completo, no solo el ID, porque necesitamos el book_id
     returnMutation.mutate(loan);
   };
 
+  // --- 1. FILTRADO ---
   const filteredLoans = loans.filter((loan) => {
     if (!searchTerm) return true;
     const searchLower = searchTerm.toLowerCase();
@@ -113,6 +126,25 @@ export default function LoansPage() {
     const userName = loan.profiles?.full_name?.toLowerCase() || "";
     return bookTitle.includes(searchLower) || userName.includes(searchLower);
   });
+
+  // --- 2. 🟢 NUEVO: ORDENAMIENTO ---
+  const sortedLoans = [...filteredLoans].sort((a, b) => {
+    const dateA = new Date(a.loan_date);
+    const dateB = new Date(b.loan_date);
+
+    return sortOrder === "asc"
+      ? dateA - dateB // Ascendente: Antiguo -> Nuevo
+      : dateB - dateA; // Descendente: Nuevo -> Antiguo
+  });
+
+  // --- 3. PAGINACIÓN (Usamos sortedLoans en vez de filteredLoans) ---
+  const totalItems = sortedLoans.length;
+  const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
+
+  const paginatedLoans = sortedLoans.slice(
+    (page - 1) * ITEMS_PER_PAGE,
+    page * ITEMS_PER_PAGE
+  );
 
   const formatDate = (dateString) => {
     if (!dateString) return "-";
@@ -167,14 +199,30 @@ export default function LoansPage() {
       </div>
 
       {/* TABLA */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100 text-xs uppercase text-gray-500 font-semibold tracking-wider">
-                <th className="px-6 py-4">Libro</th>
+                <th className="px-6 py-4 w-1/3">Libro</th>
                 <th className="px-6 py-4">Estudiante</th>
-                <th className="px-6 py-4">Fecha Préstamo</th>
+
+                {/* 🟢 COLUMNA FECHA CON BOTÓN DE ORDENAMIENTO */}
+                <th
+                  className="px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors group select-none"
+                  onClick={toggleSort}
+                  title="Clic para cambiar orden"
+                >
+                  <div className="flex items-center gap-1">
+                    Fecha Préstamo
+                    {sortOrder === "desc" ? (
+                      <ArrowDown className="w-3.5 h-3.5 text-primary" />
+                    ) : (
+                      <ArrowUp className="w-3.5 h-3.5 text-primary" />
+                    )}
+                  </div>
+                </th>
+
                 <th className="px-6 py-4">Fecha Devolución</th>
                 <th className="px-6 py-4 text-center">Estado</th>
                 <th className="px-6 py-4 text-right">Acción</th>
@@ -193,31 +241,36 @@ export default function LoansPage() {
                     </div>
                   </td>
                 </tr>
-              ) : filteredLoans.length > 0 ? (
-                filteredLoans.map((loan) => (
+              ) : paginatedLoans.length > 0 ? (
+                paginatedLoans.map((loan) => (
                   <tr
                     key={loan.id}
                     className="hover:bg-gray-50 transition-colors"
                   >
                     <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="bg-orange-50 p-2 rounded-lg text-orange-600">
+                      <div className="flex items-start gap-3">
+                        <div className="bg-orange-50 p-2 rounded-lg text-orange-600 mt-1 shrink-0">
                           <BookOpen className="w-4 h-4" />
                         </div>
                         <div>
-                          <p
-                            className="font-medium text-gray-800 text-sm max-w-[200px] truncate"
-                            title={loan.books?.title}
-                          >
+                          <p className="font-medium text-gray-800 text-sm leading-snug">
                             {loan.books?.title || "Libro eliminado"}
                           </p>
-                          <p className="text-xs text-gray-500">
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {loan.books?.author && (
+                              <span className="font-medium">
+                                {loan.books.author}
+                              </span>
+                            )}
+                            {loan.books?.author &&
+                              loan.books?.category &&
+                              " • "}
                             {loan.books?.category || "General"}
                           </p>
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4 align-top pt-5">
                       <div className="flex items-center gap-2">
                         <User className="w-4 h-4 text-gray-400" />
                         <div>
@@ -230,13 +283,13 @@ export default function LoansPage() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
+                    <td className="px-6 py-4 text-sm text-gray-600 align-top pt-5">
                       {formatDate(loan.loan_date)}
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
+                    <td className="px-6 py-4 text-sm text-gray-600 align-top pt-5">
                       {loan.return_date ? formatDate(loan.return_date) : "-"}
                     </td>
-                    <td className="px-6 py-4 text-center">
+                    <td className="px-6 py-4 text-center align-top pt-5">
                       <span
                         className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
                           loan.status === "ACTIVO"
@@ -247,10 +300,10 @@ export default function LoansPage() {
                         {loan.status === "ACTIVO" ? "En Curso" : "Devuelto"}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-right">
+                    <td className="px-6 py-4 text-right align-top pt-5">
                       {loan.status === "ACTIVO" && (
                         <button
-                          onClick={() => handleReturnBook(loan)} // PASAMOS TODO EL OBJETO LOAN
+                          onClick={() => handleReturnBook(loan)}
                           disabled={returnMutation.isLoading}
                           className="text-xs bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-3 py-1 rounded-md transition-colors shadow-sm flex items-center gap-1 ml-auto disabled:opacity-50"
                         >
@@ -276,13 +329,41 @@ export default function LoansPage() {
                     colSpan="6"
                     className="px-6 py-10 text-center text-gray-400 italic"
                   >
-                    No hay registros.
+                    No hay registros coinciden con tu búsqueda.
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+
+        {/* CONTROLES DE PAGINACIÓN */}
+        {paginatedLoans.length > 0 && totalPages > 1 && (
+          <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50">
+            <span className="text-xs text-gray-500">
+              Mostrando {paginatedLoans.length} de {totalItems} registros
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="p-1 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="w-5 h-5 text-gray-600" />
+              </button>
+              <span className="text-sm font-medium text-gray-700">
+                Página {page} de {totalPages}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="p-1 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight className="w-5 h-5 text-gray-600" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
