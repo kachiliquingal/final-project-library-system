@@ -20,7 +20,7 @@ export default function UsersPage() {
   
   // PAGINACIÓN
   const [page, setPage] = useState(1);
-  const ITEMS_PER_PAGE = 8; // 🟢 Solicitado: 8 por página
+  const ITEMS_PER_PAGE = 8; 
 
   const queryClient = useQueryClient();
 
@@ -33,8 +33,6 @@ export default function UsersPage() {
   } = useQuery({
     queryKey: ["profiles", searchTerm],
     queryFn: async () => {
-      // console.log("📡 Cargando usuarios...");
-      
       // 🟢 OPTIMIZACIÓN: Traemos también los préstamos para contar los activos
       let query = supabase
         .from("profiles")
@@ -57,7 +55,9 @@ export default function UsersPage() {
       if (error) throw error;
       return data;
     },
-    staleTime: 1000 * 60 * 5, 
+    // 🔴 CAMBIO CLAVE: staleTime en 0 asegura que SIEMPRE que entres a esta página
+    // se verifiquen los datos más recientes (ej. si acabas de devolver un libro en otra pestaña).
+    staleTime: 0, 
   });
 
   // Resetear página al buscar
@@ -66,12 +66,15 @@ export default function UsersPage() {
   }, [searchTerm]);
 
   // 2. REALTIME
+  // Escuchamos cambios en perfiles (nuevos usuarios)
   useRealtime("profiles", () => {
+    console.log("⚡ Cambio en profiles -> Recargando lista");
     queryClient.invalidateQueries({ queryKey: ["profiles"] });
   });
   
-  // También escuchamos cambios en 'loans' para actualizar el contador de préstamos activos
+  // Escuchamos cambios en préstamos (para actualizar el contador en vivo)
   useRealtime("loans", () => {
+    console.log("⚡ Cambio en loans -> Actualizando contadores de usuarios");
     queryClient.invalidateQueries({ queryKey: ["profiles"] });
   });
 
@@ -141,7 +144,6 @@ export default function UsersPage() {
               <tr className="bg-gray-50 border-b border-gray-100 text-xs uppercase text-gray-500 font-semibold tracking-wider">
                 <th className="px-6 py-4">Usuario</th>
                 <th className="px-6 py-4">Rol</th>
-                {/* 🟢 NUEVA COLUMNA SUGERIDA */}
                 <th className="px-6 py-4 text-center">Préstamos Activos</th>
                 <th className="px-6 py-4">Fecha Registro</th>
                 <th className="px-6 py-4 text-center">Estado</th>
@@ -207,7 +209,7 @@ export default function UsersPage() {
                         </div>
                       </td>
                       
-                      {/* 🟢 DATO DE VALOR: PRÉSTAMOS ACTIVOS */}
+                      {/* DATO DE VALOR: PRÉSTAMOS ACTIVOS */}
                       <td className="px-6 py-4 text-center">
                         {user.role === "admin" ? (
                           <span className="text-gray-300">-</span>
