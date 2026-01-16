@@ -22,7 +22,8 @@ export default function InventoryPage() {
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [page, setPage] = useState(1);
 
-  const ITEMS_PER_PAGE = 9;
+  // Paginación de 8 en 8
+  const ITEMS_PER_PAGE = 8;
 
   const queryClient = useQueryClient();
 
@@ -37,7 +38,7 @@ export default function InventoryPage() {
     category: "",
   });
 
-  // 1. QUERY: LECTURA
+  // 1. QUERY: LECTURA (FILTRANDO POR SOFT DELETE)
   const {
     data: queryData,
     isLoading,
@@ -46,7 +47,11 @@ export default function InventoryPage() {
   } = useQuery({
     queryKey: ["books", page, filterStatus, searchTerm],
     queryFn: async () => {
-      let query = supabase.from("books").select("*", { count: "exact" });
+      // 🟢 CAMBIO IMPORTANTE: Filtramos solo los activos
+      let query = supabase
+        .from("books")
+        .select("*", { count: "exact" })
+        .eq("is_active", true); // <--- SOLO TRAEMOS LOS ACTIVOS
 
       if (searchTerm) {
         query = query.or(
@@ -84,6 +89,7 @@ export default function InventoryPage() {
   // 2. MUTATION: CREAR
   const createMutation = useMutation({
     mutationFn: async (newBook) => {
+      // Al crear, por defecto is_active es true desde base de datos
       const { error } = await supabase
         .from("books")
         .insert([{ ...newBook, status: "DISPONIBLE" }]);
@@ -117,23 +123,21 @@ export default function InventoryPage() {
     onError: (err) => alert("Error al actualizar: " + err.message),
   });
 
-  // 4. MUTATION: ELIMINAR (Hard Delete)
+  // 4. MUTATION: ELIMINAR (AHORA ES SOFT DELETE)
   const deleteMutation = useMutation({
     mutationFn: async (bookId) => {
-      // 1. Borrar historial
-      const { error: loanError } = await supabase
-        .from("loans")
-        .delete()
-        .eq("book_id", bookId);
-      if (loanError) throw loanError;
+      // 🟢 CAMBIO RADICAL: Ya no borramos historial ni usamos DELETE
+      // Solo "apagamos" el libro.
+      const { error } = await supabase
+        .from("books")
+        .update({ is_active: false }) // Soft Delete
+        .eq("id", bookId);
 
-      // 2. Borrar libro
-      const { error } = await supabase.from("books").delete().eq("id", bookId);
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["books"] });
-      showSuccess("Libro y su historial eliminados correctamente.");
+      showSuccess("Libro eliminado correctamente (Archivado).");
     },
     onError: (err) => alert("Error al eliminar: " + err.message),
   });
@@ -345,7 +349,7 @@ export default function InventoryPage() {
           </table>
         </div>
 
-        {/* 🟢 CAMBIO 2: PAGINACIÓN UNIFICADA (Estilo Chevron) */}
+        {/* PAGINACIÓN */}
         {books.length > 0 && totalPages > 1 && (
           <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50">
             <span className="text-xs text-gray-500">
@@ -464,7 +468,7 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {/* 2. MODAL CONFIRMACIÓN ELIMINAR */}
+      {/* 2. MODAL CONFIRMACIÓN ELIMINAR (SOFT DELETE) */}
       {deletingBook && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 text-center">
@@ -477,8 +481,9 @@ export default function InventoryPage() {
             <p className="text-gray-500 text-sm mb-6">
               Estás a punto de eliminar <strong>"{deletingBook.title}"</strong>.{" "}
               <br />
-              <span className="text-red-500 font-medium text-xs">
-                ⚠️ Esto borrará también todo su historial de préstamos.
+              <span className="text-gray-400 font-medium text-xs mt-2 block">
+                (El historial de préstamos se conservará, pero el libro ya no
+                aparecerá en el inventario activo).
               </span>
             </p>
 
