@@ -12,6 +12,8 @@ export default function AdminLayout() {
         return "Gestión de Inventario";
       case "/admin/users":
         return "Gestión de Usuarios";
+      case "/admin/loans":
+        return "Gestión de Préstamos";
       case "/admin/settings":
         return "Configuración";
       default:

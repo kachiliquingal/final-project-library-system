@@ -13,12 +13,15 @@ import {
   Save,
   TriangleAlert,
   CheckCircle,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 export default function InventoryPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [page, setPage] = useState(1);
+
   const ITEMS_PER_PAGE = 9;
 
   const queryClient = useQueryClient();
@@ -43,7 +46,6 @@ export default function InventoryPage() {
   } = useQuery({
     queryKey: ["books", page, filterStatus, searchTerm],
     queryFn: async () => {
-      // 🧹 LOG REMOVED
       let query = supabase.from("books").select("*", { count: "exact" });
 
       if (searchTerm) {
@@ -137,7 +139,6 @@ export default function InventoryPage() {
   });
 
   useRealtime("books", () => {
-    // 🧹 LOG REMOVED
     queryClient.invalidateQueries({ queryKey: ["books"] });
   });
 
@@ -344,27 +345,29 @@ export default function InventoryPage() {
           </table>
         </div>
 
-        {/* PAGINACIÓN */}
+        {/* 🟢 CAMBIO 2: PAGINACIÓN UNIFICADA (Estilo Chevron) */}
         {books.length > 0 && totalPages > 1 && (
           <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50">
-            <span className="text-sm text-gray-500">
-              Página <span className="font-bold text-gray-800">{page}</span> de{" "}
-              {totalPages}
+            <span className="text-xs text-gray-500">
+              Mostrando {books.length} de {totalCount} libros
             </span>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page === 1 || isLoading}
-                className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600"
+                className="p-1 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                Anterior
+                <ChevronLeft className="w-5 h-5 text-gray-600" />
               </button>
+              <span className="text-sm font-medium text-gray-700">
+                Página {page} de {totalPages}
+              </span>
               <button
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 disabled={page === totalPages || isLoading}
-                className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600"
+                className="p-1 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                Siguiente
+                <ChevronRight className="w-5 h-5 text-gray-600" />
               </button>
             </div>
           </div>
