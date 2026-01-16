@@ -23,7 +23,7 @@ export default function LoansPage() {
   const [page, setPage] = useState(1);
   const [sortOrder, setSortOrder] = useState("desc");
 
-  const ITEMS_PER_PAGE = 9;
+  const ITEMS_PER_PAGE = 8;
   const queryClient = useQueryClient();
 
   // --- ESTADOS PARA MODALES ---
