@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { supabase } from "../../api/supabaseClient";
 import { useAuth } from "../../context/AuthContext";
-import { useRealtime } from "../../hooks/useRealtime"; // <--- 1. Hook unificado
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"; // <--- 2. TanStack
+import { useRealtime } from "../../hooks/useRealtime";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
   Search,
   BookOpen,
@@ -12,30 +12,48 @@ import {
   ChevronLeft,
   ChevronRight,
   AlertCircle,
+  TrendingUp,
+  Star,
+  TriangleAlert,
+  X
 } from "lucide-react";
+
+// 🟢 MAPA DE COLORES POR CATEGORÍA
+const getCategoryColor = (category) => {
+  const normalizedCategory = category?.toLowerCase().trim() || "";
+  
+  if (normalizedCategory.includes("matemática") || normalizedCategory.includes("calculo")) return "from-blue-600 to-indigo-600";
+  if (normalizedCategory.includes("fisica") || normalizedCategory.includes("física")) return "from-violet-600 to-purple-600";
+  if (normalizedCategory.includes("quimica") || normalizedCategory.includes("química")) return "from-emerald-500 to-teal-600";
+  if (normalizedCategory.includes("programacion") || normalizedCategory.includes("sistemas") || normalizedCategory.includes("software")) return "from-slate-700 to-gray-800";
+  if (normalizedCategory.includes("redes") || normalizedCategory.includes("telecom")) return "from-cyan-600 to-blue-500";
+  if (normalizedCategory.includes("electronica") || normalizedCategory.includes("eléctrica")) return "from-amber-500 to-orange-600";
+  
+  // Color por defecto (Gris elegante)
+  return "from-gray-500 to-slate-600";
+};
 
 export default function UserCatalog() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
-  // Estados UI
   const [searchTerm, setSearchTerm] = useState("");
   const [page, setPage] = useState(1);
   const ITEMS_PER_PAGE = 8;
 
-  // 🔴 3. USEQUERY: Carga de libros con Caché + Offline
+  // MODALES
+  const [bookToRequest, setBookToRequest] = useState(null);
+  const [successMessage, setSuccessMessage] = useState(null);
+
+  // 1. QUERY: Catálogo
   const {
     data: queryData,
     isLoading,
     isError,
     error,
   } = useQuery({
-    // La clave incluye página y búsqueda. Si cambian, TanStack busca nuevos datos.
     queryKey: ["catalog", page, searchTerm],
-
     queryFn: async () => {
-      console.log("📡 Buscando libros en el catálogo...");
-
       let query = supabase.from("books").select("*", { count: "exact" });
 
       if (searchTerm) {
@@ -52,22 +70,35 @@ export default function UserCatalog() {
         .range(from, to);
 
       if (error) throw error;
-
       return { data, count };
     },
-    keepPreviousData: true, // Mantiene los datos viejos mientras carga la siguiente página (mejor UX)
-    staleTime: 1000 * 60, // 1 minuto de frescura (puedes poner 0 si quieres instantáneo siempre)
+    keepPreviousData: true,
+    staleTime: 1000 * 60,
   });
 
-  // Extraemos datos de forma segura
+  // 2. QUERY: Top 5
+  const { data: topBooks = [] } = useQuery({
+    queryKey: ["top-books"],
+    queryFn: async () => {
+      const { data: loans } = await supabase.from("loans").select("book_id");
+      const counts = {};
+      loans?.forEach(l => { counts[l.book_id] = (counts[l.book_id] || 0) + 1 });
+      const sortedIds = Object.keys(counts).sort((a, b) => counts[b] - counts[a]).slice(0, 5);
+      
+      if (sortedIds.length === 0) return [];
+      const { data: books } = await supabase.from("books").select("*").in("id", sortedIds);
+      return books || [];
+    },
+    staleTime: 1000 * 60 * 10,
+  });
+
   const books = queryData?.data || [];
   const totalBooks = queryData?.count || 0;
   const totalPages = Math.ceil(totalBooks / ITEMS_PER_PAGE) || 1;
 
-  // 🔴 4. USEMUTATION: Solicitud de Préstamo (Transacción)
+  // 3. MUTATION
   const loanMutation = useMutation({
     mutationFn: async (book) => {
-      // 1. Bloqueo Optimista (Race Condition check)
       const { data: updatedBook, error: updateError } = await supabase
         .from("books")
         .update({ status: "PRESTADO" })
@@ -76,13 +107,8 @@ export default function UserCatalog() {
         .select();
 
       if (updateError) throw updateError;
+      if (!updatedBook || updatedBook.length === 0) throw new Error("ALREADY_TAKEN");
 
-      // Si no devolvió nada, significa que alguien ganó el libro milisegundos antes
-      if (!updatedBook || updatedBook.length === 0) {
-        throw new Error("ALREADY_TAKEN");
-      }
-
-      // 2. Crear Ticket de Préstamo
       const { error: loanError } = await supabase.from("loans").insert([
         {
           book_id: book.id,
@@ -95,40 +121,39 @@ export default function UserCatalog() {
       if (loanError) throw loanError;
     },
     onSuccess: () => {
-      alert(
-        "¡Préstamo exitoso! Por favor acércate a biblioteca a recoger tu libro."
-      );
-      // Actualizamos Catálogo y Mis Préstamos
+      setBookToRequest(null);
+      setSuccessMessage("¡Libro reservado con éxito! Por favor acércate a la biblioteca.");
       queryClient.invalidateQueries({ queryKey: ["catalog"] });
       queryClient.invalidateQueries({ queryKey: ["my-loans"] });
+      queryClient.invalidateQueries({ queryKey: ["top-books"] });
     },
     onError: (err) => {
+      setBookToRequest(null);
       if (err.message === "ALREADY_TAKEN") {
-        alert(
-          "¡Lo sentimos! Alguien más acaba de solicitar este libro hace un instante."
-        );
-        queryClient.invalidateQueries({ queryKey: ["catalog"] }); // Refrescamos para ver el estado real
+        alert("¡Ups! Alguien más ganó este libro hace un instante.");
+        queryClient.invalidateQueries({ queryKey: ["catalog"] });
+        queryClient.invalidateQueries({ queryKey: ["top-books"] }); // También refrescamos top aquí por si acaso
       } else {
-        console.error("Error préstamo:", err);
         alert("Error al procesar la solicitud.");
       }
     },
   });
 
-  // 🔴 5. REALTIME: Si el Admin agrega/borra libros o alguien pide uno
+  // 🔴 4. REALTIME CORREGIDO: Escuchamos cambios y actualizamos AMBAS listas
   useRealtime("books", () => {
-    console.log("⚡ Cambio en catálogo detectado -> Refrescando");
-    queryClient.invalidateQueries({ queryKey: ["catalog"] });
+    // console.log("⚡ Cambio en libros detectado (Realtime)");
+    queryClient.invalidateQueries({ queryKey: ["catalog"] });   // Actualiza lista principal
+    queryClient.invalidateQueries({ queryKey: ["top-books"] }); // 🟢 Actualiza el Top 5
   });
 
-  const handleRequestLoan = async (book) => {
-    if (
-      !window.confirm(
-        `¿Deseas solicitar el préstamo del libro "${book.title}"?`
-      )
-    )
-      return;
-    loanMutation.mutate(book);
+  const handleRequestClick = (book) => {
+    setBookToRequest(book);
+  };
+
+  const confirmLoan = () => {
+    if (bookToRequest) {
+      loanMutation.mutate(bookToRequest);
+    }
   };
 
   const handleSearch = (e) => {
@@ -136,7 +161,6 @@ export default function UserCatalog() {
     setPage(1);
   };
 
-  // Manejo visual de errores
   if (isError) {
     return (
       <div className="p-8 text-center text-red-500 bg-red-50 rounded-xl border border-red-100 mt-10">
@@ -149,148 +173,272 @@ export default function UserCatalog() {
 
   return (
     <div className="space-y-8 pb-10">
-      {/* 1. BUSCADOR HERO */}
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center space-y-4">
-        <h2 className="text-2xl font-bold text-gray-800">
-          Biblioteca de Ingeniería
-        </h2>
+      
+      {/* 1. HERO SECTION */}
+      <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 text-center space-y-6 relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500"></div>
+        
+        <div>
+          <h2 className="text-3xl font-extrabold text-gray-800 tracking-tight">Biblioteca Digital</h2>
+          <p className="text-gray-500 mt-2">Explora nuestro catálogo y reserva tu próximo libro.</p>
+        </div>
+        
         <div className="relative max-w-2xl mx-auto">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+          <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
           <input
             type="text"
             placeholder="Buscar por título, autor o categoría..."
             value={searchTerm}
             onChange={handleSearch}
-            className="w-full pl-12 pr-4 py-4 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all text-lg"
+            className="w-full pl-14 pr-6 py-4 bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all text-lg shadow-sm"
           />
         </div>
       </div>
 
-      {isLoading ? (
-        <div className="flex justify-center py-20">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-        </div>
-      ) : (
-        <>
-          {/* 2. CATÁLOGO CON TARJETAS */}
+      <div className="space-y-12">
+        {/* 2. SECCIÓN TOP 5 */}
+        {!searchTerm && topBooks.length > 0 && (
           <section>
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                <BookOpen className="w-5 h-5 text-primary" />
-                Catálogo ({totalBooks} resultados)
-              </h3>
-
-              <span className="text-xs text-gray-500">
-                Página {page} de {totalPages}
-              </span>
+            <div className="flex items-center gap-2 mb-6">
+              <div className="p-2 bg-yellow-50 rounded-lg text-yellow-600">
+                <TrendingUp className="w-6 h-6" />
+              </div>
+              <h3 className="text-2xl font-bold text-gray-800">Los Más Solicitados</h3>
             </div>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-5">
+              {topBooks.map((book, idx) => (
+                <div key={book.id} className="group relative bg-white rounded-2xl shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all border border-gray-100 overflow-hidden cursor-pointer">
+                  <div className="absolute top-3 left-3 bg-white/95 backdrop-blur text-gray-800 text-xs font-bold px-2 py-1 rounded-md shadow-sm z-10 flex items-center gap-1 border border-gray-100">
+                    <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" /> Top {idx + 1}
+                  </div>
+                  
+                  {/* PORTADA TEMÁTICA */}
+                  <div className={`h-36 w-full bg-gradient-to-br ${getCategoryColor(book.category)} p-5 flex items-end relative overflow-hidden transition-colors duration-500`}>
+                    <BookOpen className="w-20 h-20 text-white/10 absolute -top-4 -right-4 rotate-12" />
+                    <h4 className="text-white font-bold text-sm leading-tight drop-shadow-md relative z-10 line-clamp-2">
+                      {book.title}
+                    </h4>
+                  </div>
+                  
+                  <div className="p-4">
+                    <p className="text-xs text-gray-500 truncate mb-3">{book.author}</p>
+                    
+                    {/* BOTÓN UNIFICADO */}
+                    <button 
+                      onClick={() => handleRequestClick(book)}
+                      disabled={book.status !== "DISPONIBLE"}
+                      className={`w-full py-2 text-xs font-bold rounded-xl transition-all shadow-sm border border-transparent
+                        ${book.status === "DISPONIBLE" 
+                        ? "bg-gray-900 text-white hover:bg-emerald-600 hover:shadow-lg hover:shadow-emerald-600/20 active:scale-95" 
+                        : "bg-gray-100 text-gray-400 cursor-not-allowed border-gray-100"
+                      }`}
+                    >
+                      {book.status === "DISPONIBLE" ? "Solicitar Préstamo" : "No Disponible"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        {/* 3. CATÁLOGO PRINCIPAL */}
+        <section>
+          <div className="flex flex-col sm:flex-row justify-between items-end mb-6 gap-4">
+            <div>
+              <h3 className="text-2xl font-bold text-gray-800">Catálogo General</h3>
+              <p className="text-sm text-gray-500 mt-1">
+                {isLoading ? "Cargando..." : `${totalBooks} libros disponibles`}
+              </p>
+            </div>
+            
+            {totalPages > 1 && (
+              <div className="flex gap-2 bg-white p-1 rounded-xl shadow-sm border border-gray-100">
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-50 disabled:opacity-30 transition-all text-gray-600"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                <div className="flex items-center px-2 text-sm font-medium text-gray-600">
+                  {page} / {totalPages}
+                </div>
+                <button
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-50 disabled:opacity-30 transition-all text-gray-600"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              </div>
+            )}
+          </div>
+
+          {isLoading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="h-72 bg-gray-200 rounded-2xl animate-pulse" />
+              ))}
+            </div>
+          ) : books.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {books.map((book) => (
                 <div
                   key={book.id}
-                  className="bg-white rounded-xl border border-gray-100 overflow-hidden hover:border-primary/30 transition-colors flex flex-col shadow-sm hover:shadow-md"
+                  className="bg-white rounded-2xl border border-gray-100 overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col group"
                 >
-                  <div className="p-5 flex-1">
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="text-xs font-mono text-gray-400">
-                        #{book.id}
-                      </span>
+                  {/* PORTADA CON COLOR POR CATEGORÍA */}
+                  <div className={`h-48 bg-gradient-to-br ${getCategoryColor(book.category)} relative p-6 flex flex-col justify-between transition-colors duration-500`}>
+                    <div className="absolute top-0 right-0 p-4 opacity-20">
+                      <BookOpen className="w-24 h-24 text-white rotate-12" />
+                    </div>
+                    
+                    {/* BADGE DE ESTADO */}
+                    <div className="self-start relative z-10">
                       {book.status === "DISPONIBLE" ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold bg-green-50 text-green-700">
-                          <CheckCircle className="w-3 h-3" /> DISPONIBLE
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-extrabold bg-white text-emerald-600 shadow-lg tracking-wide uppercase">
+                          <CheckCircle className="w-3.5 h-3.5" /> Disponible
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold bg-orange-50 text-orange-700">
-                          <Clock className="w-3 h-3" /> PRESTADO
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-extrabold bg-white text-orange-700 shadow-lg tracking-wide uppercase">
+                          <Clock className="w-3.5 h-3.5" /> Prestado
                         </span>
                       )}
                     </div>
 
-                    <h4
-                      className="text-base font-bold text-gray-800 mb-1 leading-tight line-clamp-2"
-                      title={book.title}
-                    >
+                    <h3 className="text-white font-bold text-xl leading-tight drop-shadow-md line-clamp-3 z-10">
                       {book.title}
-                    </h4>
-                    <p className="text-sm text-gray-500 mb-3 line-clamp-1">
-                      {book.author}
-                    </p>
-
-                    <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded-lg inline-block">
-                      {book.category || "General"}
-                    </div>
+                    </h3>
                   </div>
 
-                  {/* BOTÓN DE ACCIÓN CON LÓGICA */}
-                  <div className="p-4 border-t border-gray-50 bg-gray-50/50">
+                  {/* INFO */}
+                  <div className="p-6 flex-1 flex flex-col">
+                    <div className="flex-1 space-y-2">
+                      <p className="text-gray-500 text-sm font-medium flex items-center gap-2">
+                        <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
+                        {book.author}
+                      </p>
+                      <span className="inline-block px-3 py-1 bg-gray-50 text-gray-500 text-xs font-semibold rounded-full uppercase tracking-wide">
+                        {book.category || "General"}
+                      </span>
+                    </div>
+
+                    {/* BOTÓN DE ACCIÓN UNIFICADO */}
                     <button
-                      onClick={() => handleRequestLoan(book)}
-                      // Deshabilitado si no está disponible O si se está procesando ESTE libro específicamente
-                      disabled={
-                        book.status !== "DISPONIBLE" ||
-                        (loanMutation.isLoading &&
-                          loanMutation.variables?.id === book.id)
-                      }
-                      className={`w-full py-2.5 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2
-                            ${
-                              book.status === "DISPONIBLE"
-                                ? "bg-white border border-gray-200 text-gray-700 hover:bg-primary hover:text-white hover:border-transparent shadow-sm"
-                                : "bg-gray-100 text-gray-400 cursor-not-allowed border border-transparent"
-                            }
-                        `}
+                      onClick={() => handleRequestClick(book)}
+                      disabled={book.status !== "DISPONIBLE" || (loanMutation.isLoading && loanMutation.variables?.id === book.id)}
+                      className={`w-full mt-6 py-3.5 rounded-xl font-bold text-sm transition-all shadow-sm flex items-center justify-center gap-2 border border-transparent
+                        ${book.status === "DISPONIBLE"
+                          ? "bg-gray-900 text-white hover:bg-emerald-600 hover:shadow-lg hover:shadow-emerald-600/20 active:scale-95"
+                          : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                        }`}
                     >
-                      {/* Mostramos Spinner solo en el libro que se está procesando */}
-                      {loanMutation.isLoading &&
-                      loanMutation.variables?.id === book.id ? (
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
-                      ) : book.status === "DISPONIBLE" ? (
-                        "Solicitar Préstamo"
+                      {loanMutation.isLoading && loanMutation.variables?.id === book.id ? (
+                        <div className="animate-spin w-5 h-5 border-2 border-white/30 border-t-white rounded-full" />
                       ) : (
-                        "No Disponible"
+                        book.status === "DISPONIBLE" ? "Solicitar Préstamo" : "No Disponible"
                       )}
                     </button>
                   </div>
                 </div>
               ))}
             </div>
-
-            {books.length === 0 && (
-              <div className="text-center py-12 bg-white rounded-xl border border-dashed border-gray-300 mt-6">
-                <XCircle className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                <p className="text-gray-500">
-                  No se encontraron libros con ese criterio.
-                </p>
+          ) : (
+            <div className="text-center py-24 bg-white rounded-3xl border border-dashed border-gray-200">
+              <div className="bg-gray-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Search className="w-10 h-10 text-gray-400" />
               </div>
-            )}
+              <h3 className="text-xl font-bold text-gray-900">No encontramos libros</h3>
+              <p className="text-gray-500 mt-2">Intenta ajustar tu búsqueda.</p>
+            </div>
+          )}
 
-            {/* 3. PAGINACIÓN INFERIOR */}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-center gap-4 mt-10">
+          {/* PAGINACIÓN INFERIOR */}
+          {totalPages > 1 && (
+            <div className="mt-12 flex justify-center">
+              <div className="bg-white p-2 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-3">
                 <button
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
                   disabled={page === 1}
-                  className="p-2 rounded-full bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600 transition-colors"
+                  className="w-12 h-12 flex items-center justify-center rounded-xl hover:bg-gray-50 disabled:opacity-30 transition-all text-gray-600"
                 >
-                  <ChevronLeft className="w-5 h-5" />
+                  <ChevronLeft className="w-6 h-6" />
                 </button>
-
-                <span className="text-sm font-medium text-gray-700">
+                <span className="px-6 text-base font-semibold text-gray-700">
                   Página {page} de {totalPages}
                 </span>
-
                 <button
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                   disabled={page === totalPages}
-                  className="p-2 rounded-full bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600 transition-colors"
+                  className="w-12 h-12 flex items-center justify-center rounded-xl hover:bg-gray-50 disabled:opacity-30 transition-all text-gray-600"
                 >
-                  <ChevronRight className="w-5 h-5" />
+                  <ChevronRight className="w-6 h-6" />
                 </button>
               </div>
-            )}
-          </section>
-        </>
+            </div>
+          )}
+        </section>
+      </div>
+
+      {/* --- MODALES --- */}
+
+      {/* 1. MODAL CONFIRMACIÓN */}
+      {bookToRequest && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden p-8 text-center transform transition-all scale-100">
+            <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-6">
+              <BookOpen className="w-8 h-8 text-blue-600" />
+            </div>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">¿Solicitar Libro?</h3>
+            <p className="text-gray-500 mb-8 leading-relaxed">
+              Estás a punto de pedir prestado <br/>
+              <span className="font-bold text-gray-800">"{bookToRequest.title}"</span>.
+            </p>
+            
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={confirmLoan}
+                disabled={loanMutation.isLoading}
+                className="w-full py-3.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/30 active:scale-95 flex items-center justify-center gap-2"
+              >
+                {loanMutation.isLoading ? (
+                   <div className="animate-spin h-5 w-5 border-2 border-white/30 border-t-white rounded-full"></div>
+                ) : "Sí, Confirmar Solicitud"}
+              </button>
+              <button
+                onClick={() => setBookToRequest(null)}
+                className="w-full py-3.5 text-gray-500 font-bold hover:bg-gray-50 rounded-xl transition-colors"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
+
+      {/* 2. MODAL DE ÉXITO */}
+      {successMessage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden p-8 text-center">
+            <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-6">
+              <CheckCircle className="w-8 h-8 text-emerald-600" />
+            </div>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">¡Solicitud Exitosa!</h3>
+            <p className="text-gray-500 mb-8 leading-relaxed">
+              {successMessage}
+            </p>
+            <button
+              onClick={() => setSuccessMessage(null)}
+              className="w-full py-3.5 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/30 active:scale-95"
+            >
+              Entendido
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

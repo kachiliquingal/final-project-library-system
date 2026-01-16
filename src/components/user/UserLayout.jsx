@@ -7,8 +7,8 @@ export default function UserLayout() {
       {/* 1. Header Superior Fijo */}
       <UserHeader />
 
-      {/* 2. Contenido Principal Centrado */}
-      <main className="flex-1 w-full max-w-7xl mx-auto p-6">
+      {/* 2. Contenido Principal - AUMENTADO EL ANCHO MÁXIMO */}
+      <main className="flex-1 w-full max-w-[1600px] mx-auto p-4 sm:p-6 lg:p-8">
         <Outlet />
       </main>
 
