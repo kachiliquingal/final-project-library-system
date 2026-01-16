@@ -12,22 +12,25 @@ import {
   AlertCircle,
   ChevronLeft,
   ChevronRight,
-  ArrowUp, // 🟢 NUEVO: Icono para orden ascendente
-  ArrowDown, // 🟢 NUEVO: Icono para orden descendente
+  ArrowUp,
+  ArrowDown,
+  X, // Para cerrar modales
 } from "lucide-react";
 
 export default function LoansPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filter, setFilter] = useState("ALL");
   const [page, setPage] = useState(1);
-
-  // 🟢 NUEVO ESTADO: 'desc' (más reciente primero) o 'asc' (más antiguo primero)
   const [sortOrder, setSortOrder] = useState("desc");
 
   const ITEMS_PER_PAGE = 9;
-
   const queryClient = useQueryClient();
 
+  // --- ESTADOS PARA MODALES ---
+  const [loanToReturn, setLoanToReturn] = useState(null); // Para el modal de confirmación
+  const [successMessage, setSuccessMessage] = useState(null); // Para el modal de éxito
+
+  // 1. QUERY DE DATOS
   const {
     data: loans = [],
     isLoading,
@@ -36,7 +39,7 @@ export default function LoansPage() {
   } = useQuery({
     queryKey: ["loans", filter],
     queryFn: async () => {
-      console.log("📡 Buscando préstamos en Supabase...");
+      // 🧹 LOG REMOVED
       let query = supabase
         .from("loans")
         .select(
@@ -50,7 +53,6 @@ export default function LoansPage() {
           profiles ( full_name, email )
         `
         )
-        // Traemos por defecto ordenado por fecha descendente desde la base
         .order("loan_date", { ascending: false });
 
       if (filter !== "ALL") {
@@ -66,13 +68,13 @@ export default function LoansPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [filter, searchTerm, sortOrder]); // Reseteamos página si cambiamos el orden
+  }, [filter, searchTerm, sortOrder]);
 
-  // Función para alternar el orden
   const toggleSort = () => {
     setSortOrder((prev) => (prev === "desc" ? "asc" : "desc"));
   };
 
+  // 2. MUTATION: DEVOLVER LIBRO
   const returnMutation = useMutation({
     mutationFn: async (loan) => {
       const { error: loanError } = await supabase
@@ -96,7 +98,12 @@ export default function LoansPage() {
       queryClient.invalidateQueries({ queryKey: ["loans"] });
       queryClient.invalidateQueries({ queryKey: ["books"] });
       queryClient.invalidateQueries({ queryKey: ["catalog"] });
-      alert("Libro devuelto correctamente y puesto en disponibilidad.");
+
+      // Cerrar confirmación y mostrar éxito
+      setLoanToReturn(null);
+      setSuccessMessage(
+        "Libro devuelto correctamente. Ya está disponible en inventario."
+      );
     },
     onError: (err) => {
       alert("Error al devolver el libro: " + err.message);
@@ -104,21 +111,22 @@ export default function LoansPage() {
   });
 
   useRealtime("loans", () => {
-    console.log("⚡ Cambio en Loans detectado -> Refrescando");
+    // 🧹 LOG REMOVED
     queryClient.invalidateQueries({ queryKey: ["loans"] });
   });
 
-  const handleReturnBook = async (loan) => {
-    if (
-      !window.confirm(
-        "¿Confirmar la devolución de este libro? Pasará a estar DISPONIBLE."
-      )
-    )
-      return;
-    returnMutation.mutate(loan);
+  // --- HANDLERS ---
+  const handleReturnClick = (loan) => {
+    setLoanToReturn(loan);
   };
 
-  // --- 1. FILTRADO ---
+  const confirmReturn = () => {
+    if (loanToReturn) {
+      returnMutation.mutate(loanToReturn);
+    }
+  };
+
+  // --- VISUALIZACIÓN ---
   const filteredLoans = loans.filter((loan) => {
     if (!searchTerm) return true;
     const searchLower = searchTerm.toLowerCase();
@@ -127,20 +135,14 @@ export default function LoansPage() {
     return bookTitle.includes(searchLower) || userName.includes(searchLower);
   });
 
-  // --- 2. 🟢 NUEVO: ORDENAMIENTO ---
   const sortedLoans = [...filteredLoans].sort((a, b) => {
     const dateA = new Date(a.loan_date);
     const dateB = new Date(b.loan_date);
-
-    return sortOrder === "asc"
-      ? dateA - dateB // Ascendente: Antiguo -> Nuevo
-      : dateB - dateA; // Descendente: Nuevo -> Antiguo
+    return sortOrder === "asc" ? dateA - dateB : dateB - dateA;
   });
 
-  // --- 3. PAGINACIÓN (Usamos sortedLoans en vez de filteredLoans) ---
   const totalItems = sortedLoans.length;
   const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
-
   const paginatedLoans = sortedLoans.slice(
     (page - 1) * ITEMS_PER_PAGE,
     page * ITEMS_PER_PAGE
@@ -166,7 +168,7 @@ export default function LoansPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
       {/* HEADER */}
       <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
@@ -206,8 +208,6 @@ export default function LoansPage() {
               <tr className="bg-gray-50 border-b border-gray-100 text-xs uppercase text-gray-500 font-semibold tracking-wider">
                 <th className="px-6 py-4 w-1/3">Libro</th>
                 <th className="px-6 py-4">Estudiante</th>
-
-                {/* 🟢 COLUMNA FECHA CON BOTÓN DE ORDENAMIENTO */}
                 <th
                   className="px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors group select-none"
                   onClick={toggleSort}
@@ -222,7 +222,6 @@ export default function LoansPage() {
                     )}
                   </div>
                 </th>
-
                 <th className="px-6 py-4">Fecha Devolución</th>
                 <th className="px-6 py-4 text-center">Estado</th>
                 <th className="px-6 py-4 text-right">Acción</th>
@@ -303,16 +302,11 @@ export default function LoansPage() {
                     <td className="px-6 py-4 text-right align-top pt-5">
                       {loan.status === "ACTIVO" && (
                         <button
-                          onClick={() => handleReturnBook(loan)}
+                          onClick={() => handleReturnClick(loan)}
                           disabled={returnMutation.isLoading}
                           className="text-xs bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-3 py-1 rounded-md transition-colors shadow-sm flex items-center gap-1 ml-auto disabled:opacity-50"
                         >
-                          {returnMutation.isLoading ? (
-                            <div className="animate-spin h-3 w-3 border-b-2 border-gray-600 rounded-full"></div>
-                          ) : (
-                            <RotateCcw className="w-3 h-3" />
-                          )}
-                          Devolver
+                          <RotateCcw className="w-3 h-3" /> Devolver
                         </button>
                       )}
                       {loan.status === "DEVUELTO" && (
@@ -337,7 +331,7 @@ export default function LoansPage() {
           </table>
         </div>
 
-        {/* CONTROLES DE PAGINACIÓN */}
+        {/* PAGINACIÓN */}
         {paginatedLoans.length > 0 && totalPages > 1 && (
           <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50">
             <span className="text-xs text-gray-500">
@@ -365,6 +359,69 @@ export default function LoansPage() {
           </div>
         )}
       </div>
+
+      {/* --- MODALES --- */}
+
+      {/* 1. MODAL CONFIRMACIÓN DEVOLUCIÓN */}
+      {loanToReturn && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 text-center">
+            <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <AlertCircle className="w-6 h-6 text-blue-600" />
+            </div>
+            <h3 className="text-lg font-bold text-gray-800 mb-2">
+              ¿Confirmar Devolución?
+            </h3>
+            <p className="text-gray-500 text-sm mb-6">
+              El libro <strong>"{loanToReturn.books?.title}"</strong> pasará a
+              estar <strong>DISPONIBLE</strong> en el inventario.
+            </p>
+
+            <div className="flex gap-3 justify-center">
+              <button
+                onClick={() => setLoanToReturn(null)}
+                className="px-4 py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 font-medium transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmReturn}
+                disabled={returnMutation.isLoading}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors flex items-center gap-2"
+              >
+                {returnMutation.isLoading ? (
+                  <div className="animate-spin h-4 w-4 border-2 border-white/30 border-t-white rounded-full"></div>
+                ) : (
+                  <>
+                    <RotateCcw className="w-4 h-4" /> Confirmar
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2. MODAL DE ÉXITO */}
+      {successMessage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 text-center">
+            <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <CheckCircle className="w-6 h-6 text-green-600" />
+            </div>
+            <h3 className="text-lg font-bold text-gray-800 mb-2">
+              ¡Operación Exitosa!
+            </h3>
+            <p className="text-gray-500 text-sm mb-6">{successMessage}</p>
+            <button
+              onClick={() => setSuccessMessage(null)}
+              className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition-colors"
+            >
+              Aceptar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

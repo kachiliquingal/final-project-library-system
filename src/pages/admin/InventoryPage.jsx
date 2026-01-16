@@ -12,7 +12,7 @@ import {
   X,
   Save,
   TriangleAlert,
-  CheckCircle, // 🟢 Importamos icono de éxito
+  CheckCircle,
 } from "lucide-react";
 
 export default function InventoryPage() {
@@ -23,12 +23,9 @@ export default function InventoryPage() {
 
   const queryClient = useQueryClient();
 
-  // --- ESTADOS DE MODALES ---
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [editingBook, setEditingBook] = useState(null);
   const [deletingBook, setDeletingBook] = useState(null);
-
-  // 🟢 NUEVO ESTADO: Mensaje de éxito para el modal bonito
   const [successMessage, setSuccessMessage] = useState(null);
 
   const [formData, setFormData] = useState({
@@ -46,6 +43,7 @@ export default function InventoryPage() {
   } = useQuery({
     queryKey: ["books", page, filterStatus, searchTerm],
     queryFn: async () => {
+      // 🧹 LOG REMOVED
       let query = supabase.from("books").select("*", { count: "exact" });
 
       if (searchTerm) {
@@ -76,12 +74,9 @@ export default function InventoryPage() {
   const totalCount = queryData?.count || 0;
   const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE) || 1;
 
-  // HELPER PARA MOSTRAR ÉXITO
   const showSuccess = (msg) => {
     closeModals();
     setSuccessMessage(msg);
-    // Opcional: Cerrar automático después de 3 segundos
-    // setTimeout(() => setSuccessMessage(null), 3000);
   };
 
   // 2. MUTATION: CREAR
@@ -94,7 +89,7 @@ export default function InventoryPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["books"] });
-      showSuccess("¡Libro creado exitosamente!"); // 🟢 Usamos modal bonito
+      showSuccess("¡Libro creado exitosamente!");
     },
     onError: (err) => alert("Error al crear: " + err.message),
   });
@@ -115,12 +110,12 @@ export default function InventoryPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["books"] });
-      showSuccess("Libro actualizado correctamente."); // 🟢 Usamos modal bonito
+      showSuccess("Libro actualizado correctamente.");
     },
     onError: (err) => alert("Error al actualizar: " + err.message),
   });
 
-  // 4. MUTATION: ELIMINAR (Hard Delete en cascada)
+  // 4. MUTATION: ELIMINAR (Hard Delete)
   const deleteMutation = useMutation({
     mutationFn: async (bookId) => {
       // 1. Borrar historial
@@ -136,13 +131,13 @@ export default function InventoryPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["books"] });
-      showSuccess("Libro y su historial eliminados correctamente."); // 🟢 Usamos modal bonito
+      showSuccess("Libro y su historial eliminados correctamente.");
     },
     onError: (err) => alert("Error al eliminar: " + err.message),
   });
 
-  // REALTIME
   useRealtime("books", () => {
+    // 🧹 LOG REMOVED
     queryClient.invalidateQueries({ queryKey: ["books"] });
   });
 
@@ -507,7 +502,7 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {/* 3. 🟢 NUEVO: MODAL DE ÉXITO (BONITO) */}
+      {/* 3. MODAL DE ÉXITO */}
       {successMessage && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 text-center">
