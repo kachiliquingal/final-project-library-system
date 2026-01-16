@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { supabase } from "../../api/supabaseClient";
 import { useRealtime } from "../../hooks/useRealtime";
-import { useQuery, useQueryClient } from "@tanstack/react-query"; // <--- 1. IMPORTACIONES CLAVE
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
   Search,
   Plus,
@@ -9,32 +9,43 @@ import {
   Trash2,
   BookOpen,
   AlertCircle,
+  X,
+  Save,
+  TriangleAlert,
+  CheckCircle, // 🟢 Importamos icono de éxito
 } from "lucide-react";
 
 export default function InventoryPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [page, setPage] = useState(1);
-  const ITEMS_PER_PAGE = 10;
+  const ITEMS_PER_PAGE = 9;
 
-  // Acceso al cliente para poder invalidar caché manualmente (para Realtime)
   const queryClient = useQueryClient();
 
-  // 🔴 2. REEMPLAZO DE USEEFFECT POR USEQUERY
+  // --- ESTADOS DE MODALES ---
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [editingBook, setEditingBook] = useState(null);
+  const [deletingBook, setDeletingBook] = useState(null);
+
+  // 🟢 NUEVO ESTADO: Mensaje de éxito para el modal bonito
+  const [successMessage, setSuccessMessage] = useState(null);
+
+  const [formData, setFormData] = useState({
+    title: "",
+    author: "",
+    category: "",
+  });
+
+  // 1. QUERY: LECTURA
   const {
-    data: queryData, // Aquí viene la respuesta { data, count }
+    data: queryData,
     isLoading,
     isError,
     error,
   } = useQuery({
-    // La "Key" es como el nombre del archivo en la caché.
-    // Si cambia page, filterStatus o searchTerm, TanStack sabe que debe buscar nuevos datos.
     queryKey: ["books", page, filterStatus, searchTerm],
-
-    // Esta es la función que busca los datos (tu antigua fetchBooks)
     queryFn: async () => {
-      console.log("📡 Buscando libros en Supabase...");
-
       let query = supabase.from("books").select("*", { count: "exact" });
 
       if (searchTerm) {
@@ -55,34 +66,139 @@ export default function InventoryPage() {
         .order("id", { ascending: true });
 
       if (error) throw error;
-
-      // Retornamos un objeto con todo lo necesario
       return { data, count };
     },
-    // Opciones extra para mejorar la experiencia offline/cache
-    staleTime: 1000 * 60, // Los datos se consideran "frescos" por 1 minuto
-    keepPreviousData: true, // Mantiene los datos viejos mientras cargan los nuevos (evita parpadeos)
+    staleTime: 1000 * 60,
+    keepPreviousData: true,
   });
 
-  // Extraemos los datos de manera segura (si no ha cargado, usamos valores por defecto)
   const books = queryData?.data || [];
   const totalCount = queryData?.count || 0;
   const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE) || 1;
 
-  // 🔴 3. INTEGRACIÓN CON REALTIME
+  // HELPER PARA MOSTRAR ÉXITO
+  const showSuccess = (msg) => {
+    closeModals();
+    setSuccessMessage(msg);
+    // Opcional: Cerrar automático después de 3 segundos
+    // setTimeout(() => setSuccessMessage(null), 3000);
+  };
+
+  // 2. MUTATION: CREAR
+  const createMutation = useMutation({
+    mutationFn: async (newBook) => {
+      const { error } = await supabase
+        .from("books")
+        .insert([{ ...newBook, status: "DISPONIBLE" }]);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["books"] });
+      showSuccess("¡Libro creado exitosamente!"); // 🟢 Usamos modal bonito
+    },
+    onError: (err) => alert("Error al crear: " + err.message),
+  });
+
+  // 3. MUTATION: EDITAR
+  const updateMutation = useMutation({
+    mutationFn: async (bookData) => {
+      const { error } = await supabase
+        .from("books")
+        .update({
+          title: bookData.title,
+          author: bookData.author,
+          category: bookData.category,
+        })
+        .eq("id", editingBook.id);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["books"] });
+      showSuccess("Libro actualizado correctamente."); // 🟢 Usamos modal bonito
+    },
+    onError: (err) => alert("Error al actualizar: " + err.message),
+  });
+
+  // 4. MUTATION: ELIMINAR (Hard Delete en cascada)
+  const deleteMutation = useMutation({
+    mutationFn: async (bookId) => {
+      // 1. Borrar historial
+      const { error: loanError } = await supabase
+        .from("loans")
+        .delete()
+        .eq("book_id", bookId);
+      if (loanError) throw loanError;
+
+      // 2. Borrar libro
+      const { error } = await supabase.from("books").delete().eq("id", bookId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["books"] });
+      showSuccess("Libro y su historial eliminados correctamente."); // 🟢 Usamos modal bonito
+    },
+    onError: (err) => alert("Error al eliminar: " + err.message),
+  });
+
+  // REALTIME
   useRealtime("books", () => {
-    console.log("⚡ Cambio detectado por Realtime -> Invalidando caché");
-    // En lugar de actualizar el estado manual, le decimos a TanStack:
-    // "Los datos de 'books' están viejos, vuélvelos a pedir cuando puedas"
     queryClient.invalidateQueries({ queryKey: ["books"] });
   });
 
+  // --- HANDLERS ---
   const handleSearch = (e) => {
     setSearchTerm(e.target.value);
     setPage(1);
   };
 
-  // Manejo de errores visual
+  const openCreateModal = () => {
+    setFormData({ title: "", author: "", category: "" });
+    setIsCreateModalOpen(true);
+  };
+
+  const openEditModal = (book) => {
+    setEditingBook(book);
+    setFormData({
+      title: book.title,
+      author: book.author,
+      category: book.category || "",
+    });
+  };
+
+  const openDeleteModal = (book) => {
+    setDeletingBook(book);
+  };
+
+  const closeModals = () => {
+    setIsCreateModalOpen(false);
+    setEditingBook(null);
+    setDeletingBook(null);
+    setFormData({ title: "", author: "", category: "" });
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!formData.title || !formData.author || !formData.category) return;
+
+    if (editingBook) {
+      updateMutation.mutate(formData);
+    } else {
+      createMutation.mutate(formData);
+    }
+  };
+
+  const handleConfirmDelete = () => {
+    if (deletingBook) {
+      deleteMutation.mutate(deletingBook.id);
+    }
+  };
+
   if (isError) {
     return (
       <div className="p-8 text-center text-red-500 bg-red-50 rounded-xl border border-red-100">
@@ -93,9 +209,11 @@ export default function InventoryPage() {
     );
   }
 
+  const isFormOpen = isCreateModalOpen || !!editingBook;
+
   return (
-    <div className="space-y-6">
-      {/* 1. ENCABEZADO Y CONTROLES (Igual que antes) */}
+    <div className="space-y-6 relative">
+      {/* 1. ENCABEZADO */}
       <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div className="relative w-full md:w-96">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -122,21 +240,24 @@ export default function InventoryPage() {
             <option value="PRESTADO">Prestados</option>
           </select>
 
-          <button className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-800 transition-colors shadow-lg shadow-blue-900/20">
+          <button
+            onClick={openCreateModal}
+            className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-800 transition-colors shadow-lg shadow-blue-900/20"
+          >
             <Plus className="w-4 h-4" />
             <span className="hidden sm:inline">Nuevo Libro</span>
           </button>
         </div>
       </div>
 
-      {/* 2. TABLA DE RESULTADOS */}
+      {/* 2. TABLA */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100 text-xs uppercase text-gray-500 font-semibold tracking-wider">
                 <th className="px-6 py-4">ID</th>
-                <th className="px-6 py-4">Libro</th>
+                <th className="px-6 py-4 w-1/3">Libro</th>
                 <th className="px-6 py-4">Autor</th>
                 <th className="px-6 py-4">Categoría</th>
                 <th className="px-6 py-4 text-center">Estado</th>
@@ -144,7 +265,7 @@ export default function InventoryPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {isLoading ? ( // Aquí usamos el isLoading de TanStack
+              {isLoading ? (
                 <tr>
                   <td
                     colSpan="6"
@@ -170,7 +291,7 @@ export default function InventoryPage() {
                         <div className="bg-blue-50 p-2 rounded-lg text-blue-600">
                           <BookOpen className="w-4 h-4" />
                         </div>
-                        <span className="font-medium text-gray-800">
+                        <span className="font-medium text-gray-800 text-sm leading-snug">
                           {book.title}
                         </span>
                       </div>
@@ -197,12 +318,14 @@ export default function InventoryPage() {
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
+                          onClick={() => openEditModal(book)}
                           className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                           title="Editar"
                         >
                           <Edit className="w-4 h-4" />
                         </button>
                         <button
+                          onClick={() => openDeleteModal(book)}
                           className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                           title="Eliminar"
                         >
@@ -226,30 +349,184 @@ export default function InventoryPage() {
           </table>
         </div>
 
-        {/* 3. PAGINACIÓN */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50">
-          <span className="text-sm text-gray-500">
-            Página <span className="font-bold text-gray-800">{page}</span> de{" "}
-            {totalPages}
-          </span>
-          <div className="flex gap-2">
+        {/* PAGINACIÓN */}
+        {books.length > 0 && totalPages > 1 && (
+          <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50">
+            <span className="text-sm text-gray-500">
+              Página <span className="font-bold text-gray-800">{page}</span> de{" "}
+              {totalPages}
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1 || isLoading}
+                className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600"
+              >
+                Anterior
+              </button>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages || isLoading}
+                className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600"
+              >
+                Siguiente
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* --- MODALES --- */}
+
+      {/* 1. MODAL FORMULARIO */}
+      {isFormOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden transform transition-all scale-100">
+            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+              <h3 className="font-bold text-gray-800 text-lg">
+                {editingBook ? "Editar Libro" : "Agregar Nuevo Libro"}
+              </h3>
+              <button
+                onClick={closeModals}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Título del Libro
+                </label>
+                <input
+                  type="text"
+                  name="title"
+                  value={formData.title}
+                  onChange={handleInputChange}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                  placeholder="Ej: Clean Code"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Autor
+                </label>
+                <input
+                  type="text"
+                  name="author"
+                  value={formData.author}
+                  onChange={handleInputChange}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                  placeholder="Ej: Robert C. Martin"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Categoría
+                </label>
+                <input
+                  type="text"
+                  name="category"
+                  value={formData.category}
+                  onChange={handleInputChange}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                  placeholder="Ej: Programación"
+                />
+              </div>
+
+              <div className="pt-4 flex gap-3">
+                <button
+                  type="button"
+                  onClick={closeModals}
+                  className="flex-1 px-4 py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 font-medium transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={
+                    createMutation.isLoading || updateMutation.isLoading
+                  }
+                  className="flex-1 px-4 py-2 bg-primary text-white rounded-lg hover:bg-blue-800 font-medium transition-colors flex justify-center items-center gap-2"
+                >
+                  {createMutation.isLoading || updateMutation.isLoading ? (
+                    <div className="animate-spin h-4 w-4 border-2 border-white/30 border-t-white rounded-full"></div>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />{" "}
+                      {editingBook ? "Actualizar" : "Guardar"}
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 2. MODAL CONFIRMACIÓN ELIMINAR */}
+      {deletingBook && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 text-center">
+            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <TriangleAlert className="w-6 h-6 text-red-600" />
+            </div>
+            <h3 className="text-lg font-bold text-gray-800 mb-2">
+              ¿Eliminar libro?
+            </h3>
+            <p className="text-gray-500 text-sm mb-6">
+              Estás a punto de eliminar <strong>"{deletingBook.title}"</strong>.{" "}
+              <br />
+              <span className="text-red-500 font-medium text-xs">
+                ⚠️ Esto borrará también todo su historial de préstamos.
+              </span>
+            </p>
+
+            <div className="flex gap-3 justify-center">
+              <button
+                onClick={closeModals}
+                className="px-4 py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 font-medium transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                disabled={deleteMutation.isLoading}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-colors flex items-center gap-2"
+              >
+                {deleteMutation.isLoading ? (
+                  <div className="animate-spin h-4 w-4 border-2 border-white/30 border-t-white rounded-full"></div>
+                ) : (
+                  "Sí, Eliminar"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. 🟢 NUEVO: MODAL DE ÉXITO (BONITO) */}
+      {successMessage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 text-center">
+            <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <CheckCircle className="w-6 h-6 text-green-600" />
+            </div>
+            <h3 className="text-lg font-bold text-gray-800 mb-2">
+              ¡Operación Exitosa!
+            </h3>
+            <p className="text-gray-500 text-sm mb-6">{successMessage}</p>
             <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1 || isLoading}
-              className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600"
+              onClick={() => setSuccessMessage(null)}
+              className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition-colors"
             >
-              Anterior
-            </button>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages || isLoading}
-              className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600"
-            >
-              Siguiente
+              Aceptar
             </button>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
