@@ -10,14 +10,27 @@ export const useAuth = () => {
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  
-  // Referencia para evitar re-renderizados innecesarios en actualizaciones de sesión
+
   const userRef = useRef(null);
+
+  // Función auxiliar para crear notificación
+  const createLoginNotification = async (userData) => {
+    try {
+      await supabase.from("notifications").insert([
+        {
+          type: "LOGIN",
+          message: `Inicio de sesión detectado: ${userData.email}`,
+          user_id: userData.id,
+        },
+      ]);
+    } catch (err) {
+      console.error("Error creando notificación login:", err);
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
 
-    // 1. Cargar perfil del usuario desde la base de datos
     const fetchProfile = async (sessionUser) => {
       try {
         const { data, error } = await supabase
@@ -26,9 +39,8 @@ export const AuthProvider = ({ children }) => {
           .eq("id", sessionUser.id)
           .single();
 
-        // Ignoramos error PGRST116 (sin resultados) si es un usuario nuevo
-        if (error && error.code !== 'PGRST116') {
-            console.error("Error fetching profile:", error);
+        if (error && error.code !== "PGRST116") {
+          console.error("Error fetching profile:", error);
         }
 
         const userData = {
@@ -42,8 +54,8 @@ export const AuthProvider = ({ children }) => {
           setUser(userData);
           userRef.current = userData;
         }
+        return userData;
       } catch (error) {
-        // Fallback seguro en caso de error crítico
         const basicUser = {
           id: sessionUser.id,
           email: sessionUser.email,
@@ -51,18 +63,21 @@ export const AuthProvider = ({ children }) => {
           name: sessionUser.email,
         };
         if (mounted) {
-            setUser(basicUser);
-            userRef.current = basicUser;
+          setUser(basicUser);
+          userRef.current = basicUser;
         }
+        return basicUser;
       } finally {
         if (mounted) setLoading(false);
       }
     };
 
-    // 2. Verificación Inicial de Sesión
     const initAuth = async () => {
       try {
-        const { data: { session }, error } = await supabase.auth.getSession();
+        const {
+          data: { session },
+          error,
+        } = await supabase.auth.getSession();
         if (error) throw error;
 
         if (session && mounted) {
@@ -77,28 +92,32 @@ export const AuthProvider = ({ children }) => {
 
     initAuth();
 
-    // 3. Escuchar cambios de estado (Login, Logout, Refresh Token, Cambio de Pestaña)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === "SIGNED_OUT") {
         setUser(null);
         userRef.current = null;
         setLoading(false);
         localStorage.clear();
-      } 
-      else if (session) {
-        // OPTIMIZACIÓN CRÍTICA:
-        // Si el usuario ya está cargado en memoria, evitamos recargar el perfil.
-        // Esto previene congelamientos al cambiar de pestaña.
-        if (userRef.current && userRef.current.id === session.user.id) {
-             return; 
+        sessionStorage.removeItem("login_notified");
+      } else if (session) {
+        // Si el usuario no estaba cargado, lo cargamos
+        if (!userRef.current || userRef.current.id !== session.user.id) {
+          await fetchProfile(session.user);
         }
-        await fetchProfile(session.user);
-      } 
-      else if (!session) {
+
+        // 🟢 CORRECCIÓN: Evitar doble notificación usando sessionStorage
+        const hasNotified = sessionStorage.getItem("login_notified");
+        if (event === "SIGNED_IN" && !hasNotified) {
+          await createLoginNotification(session.user);
+          sessionStorage.setItem("login_notified", "true");
+        }
+      } else if (!session) {
         setUser(null);
         userRef.current = null;
         setLoading(false);
+        sessionStorage.removeItem("login_notified");
       }
     });
 
@@ -115,7 +134,9 @@ export const AuthProvider = ({ children }) => {
       email,
       password,
     });
+
     if (error) throw error;
+    // 🟢 ELIMINADO: Ya no creamos la notificación aquí manualmente.
     return data;
   };
 
@@ -147,6 +168,7 @@ export const AuthProvider = ({ children }) => {
     userRef.current = null;
     setLoading(false);
     localStorage.clear();
+    sessionStorage.removeItem("login_notified");
     try {
       await supabase.auth.signOut();
     } catch (error) {

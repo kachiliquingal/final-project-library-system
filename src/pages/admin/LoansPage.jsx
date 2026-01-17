@@ -14,7 +14,7 @@ import {
   ChevronRight,
   ArrowUp,
   ArrowDown,
-  X, // Para cerrar modales
+  X,
 } from "lucide-react";
 
 export default function LoansPage() {
@@ -27,8 +27,8 @@ export default function LoansPage() {
   const queryClient = useQueryClient();
 
   // --- ESTADOS PARA MODALES ---
-  const [loanToReturn, setLoanToReturn] = useState(null); // Para el modal de confirmación
-  const [successMessage, setSuccessMessage] = useState(null); // Para el modal de éxito
+  const [loanToReturn, setLoanToReturn] = useState(null);
+  const [successMessage, setSuccessMessage] = useState(null);
 
   // 1. QUERY DE DATOS
   const {
@@ -39,7 +39,6 @@ export default function LoansPage() {
   } = useQuery({
     queryKey: ["loans", filter],
     queryFn: async () => {
-      // 🧹 LOG REMOVED
       let query = supabase
         .from("loans")
         .select(
@@ -48,10 +47,11 @@ export default function LoansPage() {
           loan_date,
           return_date,
           status,
-          book_id, 
+          book_id,
+          user_id, 
           books ( title, author, category ),
           profiles ( full_name, email )
-        `
+        `,
         )
         .order("loan_date", { ascending: false });
 
@@ -94,15 +94,24 @@ export default function LoansPage() {
 
       if (bookError) throw bookError;
     },
-    onSuccess: () => {
+    onSuccess: async (data, loan) => {
+
+      // RETURN NOTIFICATION
+      await supabase.from("notifications").insert([
+        {
+          type: "RETURN",
+          message: `Devolución Confirmada: El libro "${loan.books?.title}" (Usuario: ${loan.profiles?.full_name}) ha sido retornado al inventario.`,
+          user_id: loan.user_id,
+        },
+      ]);
+
       queryClient.invalidateQueries({ queryKey: ["loans"] });
       queryClient.invalidateQueries({ queryKey: ["books"] });
       queryClient.invalidateQueries({ queryKey: ["catalog"] });
 
-      // Cerrar confirmación y mostrar éxito
       setLoanToReturn(null);
       setSuccessMessage(
-        "Libro devuelto correctamente. Ya está disponible en inventario."
+        "Libro devuelto correctamente. Ya está disponible en inventario.",
       );
     },
     onError: (err) => {
@@ -111,7 +120,6 @@ export default function LoansPage() {
   });
 
   useRealtime("loans", () => {
-    // 🧹 LOG REMOVED
     queryClient.invalidateQueries({ queryKey: ["loans"] });
   });
 
@@ -145,7 +153,7 @@ export default function LoansPage() {
   const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
   const paginatedLoans = sortedLoans.slice(
     (page - 1) * ITEMS_PER_PAGE,
-    page * ITEMS_PER_PAGE
+    page * ITEMS_PER_PAGE,
   );
 
   const formatDate = (dateString) => {
