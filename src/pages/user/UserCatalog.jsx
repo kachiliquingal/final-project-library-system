@@ -3,6 +3,7 @@ import { supabase } from "../../api/supabaseClient";
 import { useAuth } from "../../context/AuthContext";
 import { useRealtime } from "../../hooks/useRealtime";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { sendEmailNotification } from "../../api/emailService";
 import {
   Search,
   BookOpen,
@@ -159,20 +160,36 @@ export default function UserCatalog() {
         "¡Libro reservado con éxito! Por favor acércate a la biblioteca.",
       );
 
-      // 🔔 NOTIFICACIÓN DE PRÉSTAMO (NUEVO MENSAJE "SOLICITUD EXITOSA")
+      const studentName = user.name || user.email;
+
+      // 1. Notificación BD
       await supabase.from("notifications").insert([
         {
           type: "LOAN",
-          message: `Solicitud Exitosa: Se ha registrado el préstamo del libro "${variables.title}" a nombre de ${user.name || user.email}.`,
+          message: `✅ Solicitud Exitosa: Se ha registrado el préstamo del libro "${variables.title}" a nombre de ${studentName}.`,
           user_id: user.id,
         },
       ]);
 
-      // 🟢 OBLIGAR ACTUALIZACIÓN INMEDIATA DE NOTIFICACIONES (Solución al "no realtime")
+      // 2. CORREO ESTUDIANTE (Usará Plantilla Estudiante -> alejochili1103)
+      await sendEmailNotification({
+        name: studentName,
+        subject: "Confirmación de Préstamo - Biblioteca UCE",
+        message: `Has reservado exitosamente el libro "${variables.title}". Tienes 24 horas para retirarlo.`,
+        target: "student",
+      });
+
+      // 3. CORREO ADMIN (Usará Plantilla Admin -> alejochili03)
+      await sendEmailNotification({
+        name: "Administrador",
+        subject: "🔔 Nuevo Préstamo Registrado (Sistema)",
+        message: `ATENCIÓN: El estudiante ${studentName} ha solicitado el libro "${variables.title}".`,
+        target: "admin",
+      });
+
       queryClient.invalidateQueries({
         queryKey: ["user-notifications", user.id],
       });
-
       queryClient.invalidateQueries({ queryKey: ["catalog"] });
       queryClient.invalidateQueries({ queryKey: ["my-loans"] });
       queryClient.invalidateQueries({ queryKey: ["top-books"] });
@@ -289,15 +306,26 @@ export default function UserCatalog() {
                     {/* BOTÓN UNIFICADO */}
                     <button
                       onClick={() => handleRequestClick(book)}
-                      disabled={book.status !== "DISPONIBLE"}
-                      className={`w-full py-2 text-xs font-bold rounded-xl transition-all shadow-sm border border-transparent
+                      disabled={
+                        book.status !== "DISPONIBLE" ||
+                        (loanMutation.isLoading &&
+                          loanMutation.variables?.id === book.id)
+                      }
+                      className={`w-full mt-6 py-3.5 rounded-xl font-bold text-sm transition-all shadow-sm flex items-center justify-center gap-2 border border-transparent
                         ${
                           book.status === "DISPONIBLE"
                             ? "bg-gray-900 text-white hover:bg-emerald-600 hover:shadow-lg hover:shadow-emerald-600/20 active:scale-95"
-                            : "bg-gray-100 text-gray-400 cursor-not-allowed border-gray-100"
+                            : "bg-gray-100 text-gray-400 cursor-not-allowed"
                         }`}
                     >
-                      {book.status === "DISPONIBLE" ? "Solicitar" : "Ocupado"}
+                      {loanMutation.isLoading &&
+                      loanMutation.variables?.id === book.id ? (
+                        <div className="animate-spin w-5 h-5 border-2 border-white/30 border-t-white rounded-full" />
+                      ) : book.status === "DISPONIBLE" ? (
+                        "Solicitar Préstamo"
+                      ) : (
+                        "No Disponible"
+                      )}
                     </button>
                   </div>
                 </div>
@@ -335,7 +363,7 @@ export default function UserCatalog() {
                   disabled={page === totalPages}
                   className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-50 disabled:opacity-30 transition-all text-gray-600"
                 >
-                  <ChevronRight className="w-5 h-5" />
+                  <ChevronRight className="w-6 h-6" />
                 </button>
               </div>
             )}

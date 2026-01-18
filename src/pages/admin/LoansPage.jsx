@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "../../api/supabaseClient";
 import { useRealtime } from "../../hooks/useRealtime";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { sendEmailNotification } from "../../api/emailService";
 import {
   Search,
   BookOpen,
@@ -95,23 +96,42 @@ export default function LoansPage() {
       if (bookError) throw bookError;
     },
     onSuccess: async (data, loan) => {
+      const studentName = loan.profiles?.full_name || "Estudiante";
+      const bookTitle = loan.books?.title || "Libro";
 
-      // RETURN NOTIFICATION
+      // 1. Notificación BD
       await supabase.from("notifications").insert([
         {
           type: "RETURN",
-          message: `Devolución Confirmada: El libro "${loan.books?.title}" (Usuario: ${loan.profiles?.full_name}) ha sido retornado al inventario.`,
+          message: `📚 Devolución Confirmada: El libro "${bookTitle}" (Usuario: ${studentName}) ha sido retornado al inventario.`,
           user_id: loan.user_id,
         },
       ]);
+
+      // 2. CORREO ESTUDIANTE (Usará Plantilla Estudiante -> alejochili1103)
+      await sendEmailNotification({
+        name: studentName,
+        subject: "Constancia de Devolución - Biblioteca UCE",
+        message: `Se confirma la devolución exitosa del libro "${bookTitle}".`,
+        target: "student",
+      });
+
+      // 3. CORREO ADMIN (Usará Plantilla Admin -> alejochili03)
+      await sendEmailNotification({
+        name: "Administrador",
+        subject: "✅ Devolución Procesada (Sistema)",
+        message: `Has procesado exitosamente la devolución del libro "${bookTitle}" devuelto por ${studentName}.`,
+        target: "admin",
+      });
 
       queryClient.invalidateQueries({ queryKey: ["loans"] });
       queryClient.invalidateQueries({ queryKey: ["books"] });
       queryClient.invalidateQueries({ queryKey: ["catalog"] });
 
+      // Cerrar confirmación y mostrar éxito
       setLoanToReturn(null);
       setSuccessMessage(
-        "Libro devuelto correctamente. Ya está disponible en inventario.",
+        "Libro devuelto correctamente. Se han enviado las constancias por correo.",
       );
     },
     onError: (err) => {
