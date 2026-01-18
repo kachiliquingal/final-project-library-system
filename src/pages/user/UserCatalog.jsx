@@ -55,7 +55,6 @@ const getCategoryColor = (category) => {
   )
     return "from-amber-500 to-orange-600";
 
-  // Color por defecto (Gris elegante)
   return "from-gray-500 to-slate-600";
 };
 
@@ -71,7 +70,7 @@ export default function UserCatalog() {
   const [bookToRequest, setBookToRequest] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
 
-  // 1. QUERY: Catálogo
+  // 1. QUERY: Catálogo (Libros Paginados)
   const {
     data: queryData,
     isLoading,
@@ -102,25 +101,19 @@ export default function UserCatalog() {
     staleTime: 1000 * 60,
   });
 
-  // 2. QUERY: Top 5
+  // 2. QUERY: Top 5 Global (Usando RPC para saltar RLS)
   const { data: topBooks = [] } = useQuery({
     queryKey: ["top-books"],
     queryFn: async () => {
-      const { data: loans } = await supabase.from("loans").select("book_id");
-      const counts = {};
-      loans?.forEach((l) => {
-        counts[l.book_id] = (counts[l.book_id] || 0) + 1;
-      });
-      const sortedIds = Object.keys(counts)
-        .sort((a, b) => counts[b] - counts[a])
-        .slice(0, 5);
+      // 🟢 CORRECCIÓN: Usamos la función RPC que creamos en Supabase
+      // Esto asegura que el conteo sea GLOBAL y no solo del usuario actual
+      const { data, error } = await supabase.rpc("get_top_books");
 
-      if (sortedIds.length === 0) return [];
-      const { data: books } = await supabase
-        .from("books")
-        .select("*")
-        .in("id", sortedIds);
-      return books || [];
+      if (error) {
+        console.error("Error fetching top books:", error);
+        return [];
+      }
+      return data || [];
     },
     staleTime: 1000 * 60 * 10,
   });
@@ -129,7 +122,7 @@ export default function UserCatalog() {
   const totalBooks = queryData?.count || 0;
   const totalPages = Math.ceil(totalBooks / ITEMS_PER_PAGE) || 1;
 
-  // 3. MUTATION
+  // 3. MUTATION: Solicitar Préstamo
   const loanMutation = useMutation({
     mutationFn: async (book) => {
       const { data: updatedBook, error: updateError } = await supabase
@@ -162,16 +155,16 @@ export default function UserCatalog() {
 
       const studentName = user.name || user.email;
 
-      // 1. Notificación BD
+      // Notificación BD
       await supabase.from("notifications").insert([
         {
           type: "LOAN",
-          message: `✅ Solicitud Exitosa: Se ha registrado el préstamo del libro "${variables.title}" a nombre de ${studentName}.`,
+          message: `Solicitud Exitosa: Se ha registrado el préstamo del libro "${variables.title}" a nombre de ${studentName}.`,
           user_id: user.id,
         },
       ]);
 
-      // 2. CORREO ESTUDIANTE (Usará Plantilla Estudiante -> alejochili1103)
+      // Correos
       await sendEmailNotification({
         name: studentName,
         subject: "Confirmación de Préstamo - Biblioteca UCE",
@@ -179,7 +172,6 @@ export default function UserCatalog() {
         target: "student",
       });
 
-      // 3. CORREO ADMIN (Usará Plantilla Admin -> alejochili03)
       await sendEmailNotification({
         name: "Administrador",
         subject: "🔔 Nuevo Préstamo Registrado (Sistema)",
@@ -187,6 +179,7 @@ export default function UserCatalog() {
         target: "admin",
       });
 
+      // Actualizar todas las vistas
       queryClient.invalidateQueries({
         queryKey: ["user-notifications", user.id],
       });
@@ -206,10 +199,15 @@ export default function UserCatalog() {
     },
   });
 
-  // 4. REALTIME
+  // 4. REALTIME: Escuchar cambios en libros y PRÉSTAMOS
+  // 🟢 AGREGADO: Escuchamos 'loans' para que el Top 5 cambie en vivo si otro estudiante pide algo
   useRealtime("books", () => {
     queryClient.invalidateQueries({ queryKey: ["catalog"] });
     queryClient.invalidateQueries({ queryKey: ["top-books"] });
+  });
+
+  useRealtime("loans", () => {
+    queryClient.invalidateQueries({ queryKey: ["top-books"] }); // Actualiza el top si hay nuevos préstamos
   });
 
   const handleRequestClick = (book) => {
@@ -306,26 +304,15 @@ export default function UserCatalog() {
                     {/* BOTÓN UNIFICADO */}
                     <button
                       onClick={() => handleRequestClick(book)}
-                      disabled={
-                        book.status !== "DISPONIBLE" ||
-                        (loanMutation.isLoading &&
-                          loanMutation.variables?.id === book.id)
-                      }
-                      className={`w-full mt-6 py-3.5 rounded-xl font-bold text-sm transition-all shadow-sm flex items-center justify-center gap-2 border border-transparent
+                      disabled={book.status !== "DISPONIBLE"}
+                      className={`w-full py-2 text-xs font-bold rounded-xl transition-all shadow-sm border border-transparent
                         ${
                           book.status === "DISPONIBLE"
                             ? "bg-gray-900 text-white hover:bg-emerald-600 hover:shadow-lg hover:shadow-emerald-600/20 active:scale-95"
                             : "bg-gray-100 text-gray-400 cursor-not-allowed"
                         }`}
                     >
-                      {loanMutation.isLoading &&
-                      loanMutation.variables?.id === book.id ? (
-                        <div className="animate-spin w-5 h-5 border-2 border-white/30 border-t-white rounded-full" />
-                      ) : book.status === "DISPONIBLE" ? (
-                        "Solicitar Préstamo"
-                      ) : (
-                        "No Disponible"
-                      )}
+                      {book.status === "DISPONIBLE" ? "Solicitar" : "Ocupado"}
                     </button>
                   </div>
                 </div>

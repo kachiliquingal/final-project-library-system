@@ -103,7 +103,7 @@ export default function LoansPage() {
       await supabase.from("notifications").insert([
         {
           type: "RETURN",
-          message: `📚 Devolución Confirmada: El libro "${bookTitle}" (Usuario: ${studentName}) ha sido retornado al inventario.`,
+          message: `Devolución Confirmada: El libro "${bookTitle}" (Usuario: ${studentName}) ha sido retornado al inventario.`,
           user_id: loan.user_id,
         },
       ]);
