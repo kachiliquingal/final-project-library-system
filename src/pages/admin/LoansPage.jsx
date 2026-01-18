@@ -15,7 +15,7 @@ import {
   ChevronRight,
   ArrowUp,
   ArrowDown,
-  X,
+  Hash, // 🟢 Icono para el ID
 } from "lucide-react";
 
 export default function LoansPage() {
@@ -99,28 +99,35 @@ export default function LoansPage() {
       const studentName = loan.profiles?.full_name || "Estudiante";
       const bookTitle = loan.books?.title || "Libro";
 
-      // 1. Notificación BD
+      // 1. Notificación BD (Con ID de Trazabilidad)
       await supabase.from("notifications").insert([
         {
           type: "RETURN",
-          message: `Devolución Confirmada: El libro "${bookTitle}" (Usuario: ${studentName}) ha sido retornado al inventario.`,
+          message: `Devolución #${loan.id}: El libro "${bookTitle}" ha sido retornado al inventario por ${studentName}.`,
           user_id: loan.user_id,
         },
       ]);
 
-      // 2. CORREO ESTUDIANTE (Usará Plantilla Estudiante -> alejochili1103)
+      // 2. CORREO ESTUDIANTE (Con ID de Trazabilidad)
       await sendEmailNotification({
         name: studentName,
-        subject: "Constancia de Devolución - Biblioteca UCE",
-        message: `Se confirma la devolución exitosa del libro "${bookTitle}".`,
+        subject: `Constancia de Devolución #${loan.id} - Biblioteca UCE`,
+        message: `Se confirma la devolución exitosa del libro "${bookTitle}".
+        
+        ------------------------------------------
+        ✅ TICKET CERRADO: #${loan.id}
+        ------------------------------------------
+        Gracias por devolver el material a tiempo.`,
         target: "student",
       });
 
-      // 3. CORREO ADMIN (Usará Plantilla Admin -> alejochili03)
+      // 3. CORREO ADMIN (Con ID de Trazabilidad)
       await sendEmailNotification({
         name: "Administrador",
-        subject: "✅ Devolución Procesada (Sistema)",
-        message: `Has procesado exitosamente la devolución del libro "${bookTitle}" devuelto por ${studentName}.`,
+        subject: `✅ Devolución #${loan.id} Procesada (Sistema)`,
+        message: `Has procesado exitosamente la devolución del libro "${bookTitle}" devuelto por ${studentName}.
+        
+        Código de Trazabilidad: #${loan.id}`,
         target: "admin",
       });
 
@@ -131,7 +138,7 @@ export default function LoansPage() {
       // Cerrar confirmación y mostrar éxito
       setLoanToReturn(null);
       setSuccessMessage(
-        "Libro devuelto correctamente. Se han enviado las constancias por correo.",
+        `Préstamo #${loan.id} finalizado correctamente. Constancias enviadas.`,
       );
     },
     onError: (err) => {
@@ -160,7 +167,12 @@ export default function LoansPage() {
     const searchLower = searchTerm.toLowerCase();
     const bookTitle = loan.books?.title?.toLowerCase() || "";
     const userName = loan.profiles?.full_name?.toLowerCase() || "";
-    return bookTitle.includes(searchLower) || userName.includes(searchLower);
+    const loanId = loan.id.toString(); // Permitir búsqueda por ID
+    return (
+      bookTitle.includes(searchLower) ||
+      userName.includes(searchLower) ||
+      loanId.includes(searchLower)
+    );
   });
 
   const sortedLoans = [...filteredLoans].sort((a, b) => {
@@ -219,7 +231,7 @@ export default function LoansPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
-              placeholder="Buscar libro o estudiante..."
+              placeholder="Buscar por Libro, Estudiante o ID..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
@@ -234,6 +246,12 @@ export default function LoansPage() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100 text-xs uppercase text-gray-500 font-semibold tracking-wider">
+                {/* 🟢 NUEVA COLUMNA ID */}
+                <th className="px-6 py-4 w-16 text-center">
+                  <div className="flex items-center justify-center gap-1">
+                    <Hash className="w-3 h-3" /> ID
+                  </div>
+                </th>
                 <th className="px-6 py-4 w-1/3">Libro</th>
                 <th className="px-6 py-4">Estudiante</th>
                 <th
@@ -259,7 +277,7 @@ export default function LoansPage() {
               {isLoading ? (
                 <tr>
                   <td
-                    colSpan="6"
+                    colSpan="7"
                     className="px-6 py-10 text-center text-gray-400"
                   >
                     <div className="flex items-center justify-center gap-2">
@@ -274,6 +292,11 @@ export default function LoansPage() {
                     key={loan.id}
                     className="hover:bg-gray-50 transition-colors"
                   >
+                    {/* 🟢 VISUALIZACIÓN DEL ID */}
+                    <td className="px-6 py-4 text-xs font-mono font-bold text-gray-400 text-center">
+                      #{loan.id}
+                    </td>
+
                     <td className="px-6 py-4">
                       <div className="flex items-start gap-3">
                         <div className="bg-orange-50 p-2 rounded-lg text-orange-600 mt-1 shrink-0">
@@ -348,7 +371,7 @@ export default function LoansPage() {
               ) : (
                 <tr>
                   <td
-                    colSpan="6"
+                    colSpan="7"
                     className="px-6 py-10 text-center text-gray-400 italic"
                   >
                     No hay registros coinciden con tu búsqueda.
@@ -401,8 +424,10 @@ export default function LoansPage() {
               ¿Confirmar Devolución?
             </h3>
             <p className="text-gray-500 text-sm mb-6">
-              El libro <strong>"{loanToReturn.books?.title}"</strong> pasará a
-              estar <strong>DISPONIBLE</strong> en el inventario.
+              Estás a punto de cerrar el ticket{" "}
+              <strong>#{loanToReturn.id}</strong>.<br />
+              El libro <strong>"{loanToReturn.books?.title}"</strong> volverá al
+              inventario.
             </p>
 
             <div className="flex gap-3 justify-center">

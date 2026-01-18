@@ -122,9 +122,10 @@ export default function UserCatalog() {
   const totalBooks = queryData?.count || 0;
   const totalPages = Math.ceil(totalBooks / ITEMS_PER_PAGE) || 1;
 
-  // 3. MUTATION: Solicitar Préstamo
+  // 3. MUTATION: Solicitar Préstamo (MODIFICADO PARA TRAZABILIDAD)
   const loanMutation = useMutation({
     mutationFn: async (book) => {
+      // Actualizar estado del libro
       const { data: updatedBook, error: updateError } = await supabase
         .from("books")
         .update({ status: "PRESTADO" })
@@ -136,46 +137,63 @@ export default function UserCatalog() {
       if (!updatedBook || updatedBook.length === 0)
         throw new Error("ALREADY_TAKEN");
 
-      const { error: loanError } = await supabase.from("loans").insert([
-        {
-          book_id: book.id,
-          user_id: user.id,
-          loan_date: new Date().toISOString(),
-          status: "ACTIVO",
-        },
-      ]);
+      // Insertar préstamo y RECUPERAR EL ID (Trazabilidad)
+      const { data: newLoan, error: loanError } = await supabase
+        .from("loans")
+        .insert([
+          {
+            book_id: book.id,
+            user_id: user.id,
+            loan_date: new Date().toISOString(),
+            status: "ACTIVO",
+          },
+        ])
+        .select() // 🟢 Importante: Solicita devolver los datos insertados
+        .single(); // 🟢 Importante: Devuelve un solo objeto
 
       if (loanError) throw loanError;
+      return newLoan; // 🟢 Retornamos el préstamo creado para usar su ID
     },
-    onSuccess: async (data, variables) => {
+    onSuccess: async (newLoan, variables) => {
+      // newLoan contiene el ID de la transacción
       setBookToRequest(null);
+
+      // 🟢 MOSTRAR CÓDIGO EN PANTALLA
       setSuccessMessage(
-        "¡Libro reservado con éxito! Por favor acércate a la biblioteca.",
+        `¡Solicitud Exitosa! Tu código de transacción es #${newLoan.id}. Por favor acércate a la biblioteca.`,
       );
 
       const studentName = user.name || user.email;
 
-      // Notificación BD
+      // Notificación BD (Con código)
       await supabase.from("notifications").insert([
         {
           type: "LOAN",
-          message: `Solicitud Exitosa: Se ha registrado el préstamo del libro "${variables.title}" a nombre de ${studentName}.`,
+          message: `Préstamo #${newLoan.id}: Se ha registrado el libro "${variables.title}" a nombre de ${studentName}.`,
           user_id: user.id,
         },
       ]);
 
-      // Correos
+      // Correos (Con código de trazabilidad visible)
       await sendEmailNotification({
         name: studentName,
-        subject: "Confirmación de Préstamo - Biblioteca UCE",
-        message: `Has reservado exitosamente el libro "${variables.title}". Tienes 24 horas para retirarlo.`,
+        subject: `Confirmación de Préstamo #${newLoan.id} - Biblioteca UCE`,
+        message: `Has reservado exitosamente el libro "${variables.title}".
+        
+        ------------------------------------------
+        🧾 CÓDIGO DE TRANSACCIÓN: #${newLoan.id}
+        ------------------------------------------
+        
+        Tienes 24 horas para retirarlo. Presenta este código si es necesario.`,
         target: "student",
       });
 
       await sendEmailNotification({
         name: "Administrador",
-        subject: "🔔 Nuevo Préstamo Registrado (Sistema)",
-        message: `ATENCIÓN: El estudiante ${studentName} ha solicitado el libro "${variables.title}".`,
+        subject: `🔔 Nuevo Préstamo #${newLoan.id} (Sistema)`,
+        message: `ATENCIÓN: El estudiante ${studentName} ha solicitado el libro "${variables.title}".
+        
+        Código de Trazabilidad: #${newLoan.id}`,
         target: "admin",
       });
 
@@ -195,6 +213,7 @@ export default function UserCatalog() {
         queryClient.invalidateQueries({ queryKey: ["top-books"] });
       } else {
         alert("Error al procesar la solicitud.");
+        console.error(err);
       }
     },
   });
@@ -530,7 +549,7 @@ export default function UserCatalog() {
             <h3 className="text-xl font-bold text-gray-900 mb-2">
               ¡Solicitud Exitosa!
             </h3>
-            <p className="text-gray-500 mb-8 leading-relaxed">
+            <p className="text-gray-500 mb-8 leading-relaxed whitespace-pre-line">
               {successMessage}
             </p>
             <button
