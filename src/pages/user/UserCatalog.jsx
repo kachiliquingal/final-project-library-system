@@ -10,51 +10,44 @@ import {
   BookOpen,
   Clock,
   CheckCircle,
-  XCircle,
+  TrendingUp,
+  Star,
   ChevronLeft,
   ChevronRight,
   AlertCircle,
-  TrendingUp,
-  Star,
-  TriangleAlert,
-  X,
 } from "lucide-react";
 
-// ... (El mapa de colores se mantiene igual)
-const getCategoryColor = (category) => {
-  const normalizedCategory = category?.toLowerCase().trim() || "";
+const getCategoryCoverImage = (category) => {
+  const normalized = category?.toLowerCase().trim() || "";
+
+  if (normalized.includes("matemática"))
+    return "https://images.unsplash.com/photo-1635070041078-e363dbe005cb?auto=format&fit=crop&w=500&q=80";
+
+  if (normalized.includes("fisica") || normalized.includes("física"))
+    return "https://images.unsplash.com/photo-1636466497217-26a8cbeaf0aa?auto=format&fit=crop&w=500&q=80";
+
+  if (normalized.includes("quimica") || normalized.includes("química"))
+    return "https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=400&q=80";
+
+  if (normalized.includes("redes"))
+    return "https://images.unsplash.com/photo-1544197150-b99a580bbcbf?auto=format&fit=crop&w=500&q=80";
+
   if (
-    normalizedCategory.includes("matemática") ||
-    normalizedCategory.includes("calculo")
+    normalized.includes("programacion") ||
+    normalized.includes("programación")
   )
-    return "from-blue-600 to-indigo-600";
-  if (
-    normalizedCategory.includes("fisica") ||
-    normalizedCategory.includes("física")
-  )
-    return "from-violet-600 to-purple-600";
-  if (
-    normalizedCategory.includes("quimica") ||
-    normalizedCategory.includes("química")
-  )
-    return "from-emerald-500 to-teal-600";
-  if (
-    normalizedCategory.includes("programacion") ||
-    normalizedCategory.includes("sistemas") ||
-    normalizedCategory.includes("software")
-  )
-    return "from-slate-700 to-gray-800";
-  if (
-    normalizedCategory.includes("redes") ||
-    normalizedCategory.includes("telecom")
-  )
-    return "from-cyan-600 to-blue-500";
-  if (
-    normalizedCategory.includes("electronica") ||
-    normalizedCategory.includes("eléctrica")
-  )
-    return "from-amber-500 to-orange-600";
-  return "from-gray-500 to-slate-600";
+    return "https://images.unsplash.com/photo-1587620962725-abab7fe55159?auto=format&fit=crop&w=500&q=80";
+
+  if (normalized.includes("sistemas"))
+    return "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=500&q=80";
+
+  if (normalized.includes("estadistica") || normalized.includes("estadística"))
+    return "https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=500&q=80";
+
+  if (normalized.includes("gestion") || normalized.includes("gestión"))
+    return "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&fit=crop&w=500&q=80";
+
+  return "https://images.unsplash.com/photo-1481627834876-b7833e8f5570?auto=format&fit=crop&w=500&q=80";
 };
 
 export default function UserCatalog() {
@@ -62,7 +55,6 @@ export default function UserCatalog() {
   const queryClient = useQueryClient();
 
   const [searchTerm, setSearchTerm] = useState("");
-  // 🟢 2. Creamos el valor con retraso (500ms) para no saturar la BD
   const debouncedSearchTerm = useDebounce(searchTerm, 500);
 
   const [page, setPage] = useState(1);
@@ -72,19 +64,17 @@ export default function UserCatalog() {
   const [bookToRequest, setBookToRequest] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
 
-  // 1. QUERY: Catálogo (Paginado Server-Side)
+  // 1. QUERY: Catálogo
   const {
     data: queryData,
     isLoading,
     isError,
     error,
   } = useQuery({
-    // 🟢 3. Usamos debouncedSearchTerm en la Key para que espere antes de re-ejecutar
     queryKey: ["catalog", page, debouncedSearchTerm],
     queryFn: async () => {
       let query = supabase.from("books").select("*", { count: "exact" });
 
-      // 🟢 4. Filtramos usando el valor debounced
       if (debouncedSearchTerm) {
         query = query.or(
           `title.ilike.%${debouncedSearchTerm}%,author.ilike.%${debouncedSearchTerm}%,category.ilike.%${debouncedSearchTerm}%`,
@@ -211,7 +201,7 @@ export default function UserCatalog() {
     },
   });
 
-  // 4. REALTIME (Manteniendo la lógica que funciona)
+  // 4. REALTIME
   useRealtime("books", () => {
     queryClient.invalidateQueries({ queryKey: ["catalog"] });
     queryClient.invalidateQueries({ queryKey: ["top-books"] });
@@ -229,8 +219,8 @@ export default function UserCatalog() {
   };
 
   const handleSearch = (e) => {
-    setSearchTerm(e.target.value); // El input sigue siendo reactivo inmediato
-    setPage(1); // Reseteamos página, pero la petición real esperará al debounce
+    setSearchTerm(e.target.value);
+    setPage(1);
   };
 
   if (isError) {
@@ -271,7 +261,7 @@ export default function UserCatalog() {
       </div>
 
       <div className="space-y-12">
-        {/* 2. SECCIÓN TOP 5 (Se oculta al buscar, usando debouncedSearchTerm para evitar parpadeos) */}
+        {/* 2. SECCIÓN TOP 5 */}
         {!debouncedSearchTerm && topBooks.length > 0 && (
           <section>
             <div className="flex items-center gap-2 mb-6">
@@ -287,38 +277,51 @@ export default function UserCatalog() {
               {topBooks.map((book, idx) => (
                 <div
                   key={book.id}
-                  className="group relative bg-white rounded-2xl shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all border border-gray-100 overflow-hidden cursor-pointer"
+                  className="group relative bg-white rounded-2xl shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all border border-gray-100 overflow-hidden cursor-pointer flex flex-col h-full"
                 >
                   <div className="absolute top-3 left-3 bg-white/95 backdrop-blur text-gray-800 text-xs font-bold px-2 py-1 rounded-md shadow-sm z-10 flex items-center gap-1 border border-gray-100">
                     <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" />{" "}
                     Top {idx + 1}
                   </div>
 
-                  <div
-                    className={`h-36 w-full bg-gradient-to-br ${getCategoryColor(book.category)} p-5 flex items-end relative overflow-hidden transition-colors duration-500`}
-                  >
-                    <BookOpen className="w-20 h-20 text-white/10 absolute -top-4 -right-4 rotate-12" />
-                    <h4 className="text-white font-bold text-sm leading-tight drop-shadow-md relative z-10 line-clamp-2">
-                      {book.title}
-                    </h4>
+                  {/* PORTADA REAL */}
+                  <div className="h-48 w-full relative overflow-hidden bg-gray-100">
+                    <img
+                      src={
+                        book.cover_url || getCategoryCoverImage(book.category)
+                      }
+                      alt={book.title}
+                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                      loading="lazy"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                   </div>
 
-                  <div className="p-4">
-                    <p className="text-xs text-gray-500 truncate mb-3">
+                  <div className="p-4 flex flex-col flex-1">
+                    <h4
+                      className="font-bold text-gray-800 text-sm line-clamp-2 mb-1"
+                      title={book.title}
+                    >
+                      {book.title}
+                    </h4>
+                    <p className="text-xs text-gray-500 truncate mb-4">
                       {book.author}
                     </p>
-                    <button
-                      onClick={() => handleRequestClick(book)}
-                      disabled={book.status !== "DISPONIBLE"}
-                      className={`w-full py-2 text-xs font-bold rounded-xl transition-all shadow-sm border border-transparent
-                        ${
-                          book.status === "DISPONIBLE"
-                            ? "bg-gray-900 text-white hover:bg-emerald-600 hover:shadow-lg hover:shadow-emerald-600/20 active:scale-95"
-                            : "bg-gray-100 text-gray-400 cursor-not-allowed border-gray-100"
-                        }`}
-                    >
-                      {book.status === "DISPONIBLE" ? "Solicitar" : "Ocupado"}
-                    </button>
+
+                    <div className="mt-auto">
+                      <button
+                        onClick={() => handleRequestClick(book)}
+                        disabled={book.status !== "DISPONIBLE"}
+                        className={`w-full py-2 text-xs font-bold rounded-xl transition-all shadow-sm border border-transparent
+                          ${
+                            book.status === "DISPONIBLE"
+                              ? "bg-gray-900 text-white hover:bg-emerald-600 hover:shadow-lg hover:shadow-emerald-600/20 active:scale-95"
+                              : "bg-gray-100 text-gray-400 cursor-not-allowed border-gray-100"
+                          }`}
+                      >
+                        {book.status === "DISPONIBLE" ? "Solicitar" : "Ocupado"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -366,7 +369,7 @@ export default function UserCatalog() {
               {[...Array(4)].map((_, i) => (
                 <div
                   key={i}
-                  className="h-72 bg-gray-200 rounded-2xl animate-pulse"
+                  className="h-96 bg-gray-200 rounded-2xl animate-pulse"
                 />
               ))}
             </div>
@@ -375,66 +378,81 @@ export default function UserCatalog() {
               {books.map((book) => (
                 <div
                   key={book.id}
-                  className="bg-white rounded-2xl border border-gray-100 overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col group"
+                  className="bg-white rounded-2xl border border-gray-100 overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col group h-full"
                 >
-                  <div
-                    className={`h-48 bg-gradient-to-br ${getCategoryColor(book.category)} relative p-6 flex flex-col justify-between transition-colors duration-500`}
-                  >
-                    <div className="absolute top-0 right-0 p-4 opacity-20">
-                      <BookOpen className="w-24 h-24 text-white rotate-12" />
-                    </div>
+                  {/* 🟢 PORTADA REAL (Imagen) */}
+                  <div className="h-56 relative bg-gray-100 overflow-hidden">
+                    <img
+                      src={
+                        book.cover_url || getCategoryCoverImage(book.category)
+                      }
+                      alt={book.title}
+                      className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                      loading="lazy"
+                    />
 
-                    <div className="self-start relative z-10">
+                    {/* Badge de Estado Superpuesto */}
+                    <div className="absolute top-3 right-3 z-10">
                       {book.status === "DISPONIBLE" ? (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-extrabold bg-white text-emerald-600 shadow-lg tracking-wide uppercase">
-                          <CheckCircle className="w-3.5 h-3.5" /> Disponible
+                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold bg-white/90 backdrop-blur text-emerald-700 shadow-sm uppercase tracking-wide">
+                          <CheckCircle className="w-3 h-3" /> Disponible
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-extrabold bg-white text-orange-700 shadow-lg tracking-wide uppercase">
-                          <Clock className="w-3.5 h-3.5" /> Prestado
+                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold bg-white/90 backdrop-blur text-orange-700 shadow-sm uppercase tracking-wide">
+                          <Clock className="w-3 h-3" /> Prestado
                         </span>
                       )}
                     </div>
-
-                    <h3 className="text-white font-bold text-xl leading-tight drop-shadow-md line-clamp-3 z-10">
-                      {book.title}
-                    </h3>
                   </div>
 
-                  <div className="p-6 flex-1 flex flex-col">
-                    <div className="flex-1 space-y-2">
-                      <p className="text-gray-500 text-sm font-medium flex items-center gap-2">
-                        <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
-                        {book.author}
-                      </p>
-                      <span className="inline-block px-3 py-1 bg-gray-50 text-gray-500 text-xs font-semibold rounded-full uppercase tracking-wide">
+                  {/* INFO */}
+                  <div className="p-5 flex flex-col flex-1">
+                    <div className="flex-1 mb-4">
+                      <h3
+                        className="text-gray-900 font-bold text-lg leading-tight line-clamp-2 mb-2"
+                        title={book.title}
+                      >
+                        {book.title}
+                      </h3>
+
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="w-1 h-1 bg-gray-400 rounded-full"></span>
+                        <p className="text-gray-500 text-sm font-medium truncate">
+                          {book.author}
+                        </p>
+                      </div>
+
+                      <span className="inline-block px-2.5 py-0.5 bg-gray-100 text-gray-500 text-xs font-semibold rounded-md uppercase tracking-wide">
                         {book.category || "General"}
                       </span>
                     </div>
 
-                    <button
-                      onClick={() => handleRequestClick(book)}
-                      disabled={
-                        book.status !== "DISPONIBLE" ||
-                        (loanMutation.isLoading &&
-                          loanMutation.variables?.id === book.id)
-                      }
-                      className={`w-full mt-6 py-3.5 rounded-xl font-bold text-sm transition-all shadow-sm flex items-center justify-center gap-2 border border-transparent
-                        ${
-                          book.status === "DISPONIBLE"
-                            ? "bg-gray-900 text-white hover:bg-emerald-600 hover:shadow-lg hover:shadow-emerald-600/20 active:scale-95"
-                            : "bg-gray-100 text-gray-400 cursor-not-allowed"
-                        }`}
-                    >
-                      {loanMutation.isLoading &&
-                      loanMutation.variables?.id === book.id ? (
-                        <div className="animate-spin w-5 h-5 border-2 border-white/30 border-t-white rounded-full" />
-                      ) : book.status === "DISPONIBLE" ? (
-                        "Solicitar Préstamo"
-                      ) : (
-                        "No Disponible"
-                      )}
-                    </button>
+                    {/* BOTÓN DE ACCIÓN */}
+                    <div className="mt-auto pt-4 border-t border-gray-50">
+                      <button
+                        onClick={() => handleRequestClick(book)}
+                        disabled={
+                          book.status !== "DISPONIBLE" ||
+                          (loanMutation.isLoading &&
+                            loanMutation.variables?.id === book.id)
+                        }
+                        className={`w-full py-3 rounded-xl font-bold text-sm transition-all shadow-sm flex items-center justify-center gap-2 border border-transparent
+                          ${
+                            book.status === "DISPONIBLE"
+                              ? "bg-gray-900 text-white hover:bg-emerald-600 hover:shadow-lg hover:shadow-emerald-600/20 active:scale-95"
+                              : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                          }`}
+                      >
+                        {loanMutation.isLoading &&
+                        loanMutation.variables?.id === book.id ? (
+                          <div className="animate-spin w-5 h-5 border-2 border-white/30 border-t-white rounded-full" />
+                        ) : book.status === "DISPONIBLE" ? (
+                          "Solicitar Préstamo"
+                        ) : (
+                          "No Disponible"
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
