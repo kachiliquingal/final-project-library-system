@@ -9,83 +9,84 @@ import {
   User,
   Calendar,
   AlertCircle,
-  BookOpen, // Icono para préstamos
+  BookOpen,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
 } from "lucide-react";
 
 export default function UsersPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [imageErrors, setImageErrors] = useState({});
-  
-  // PAGINACIÓN
   const [page, setPage] = useState(1);
-  const ITEMS_PER_PAGE = 8; 
+  const ITEMS_PER_PAGE = 8;
 
   const queryClient = useQueryClient();
 
-  // 1. USEQUERY
+  // 1. QUERY: Server-Side Pagination & Search
   const {
-    data: users = [],
+    data: queryResponse,
     isLoading,
     isError,
     error,
   } = useQuery({
-    queryKey: ["profiles", searchTerm],
+    queryKey: ["profiles", page, searchTerm], // Dependency on page triggers refetch
     queryFn: async () => {
-      // 🟢 OPTIMIZACIÓN: Traemos también los préstamos para contar los activos
+      // Base query including active loans count
       let query = supabase
         .from("profiles")
-        .select(`
+        .select(
+          `
           *,
           loans (
             id,
             status
           )
-        `)
+        `,
+          { count: "exact" },
+        )
         .order("created_at", { ascending: false });
 
+      // Server-Side Search
       if (searchTerm) {
         query = query.or(
-          `full_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`
+          `full_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`,
         );
       }
 
-      const { data, error } = await query;
+      // Server-Side Pagination
+      const from = (page - 1) * ITEMS_PER_PAGE;
+      const to = from + ITEMS_PER_PAGE - 1;
+      query = query.range(from, to);
+
+      const { data, count, error } = await query;
       if (error) throw error;
-      return data;
+      return { data, count };
     },
-    // 🔴 CAMBIO CLAVE: staleTime en 0 asegura que SIEMPRE que entres a esta página
-    // se verifiquen los datos más recientes (ej. si acabas de devolver un libro en otra pestaña).
-    staleTime: 0, 
+    staleTime: 0, // Always fetch fresh data
+    keepPreviousData: true, // Smooth transition between pages
   });
 
-  // Resetear página al buscar
+  const users = queryResponse?.data || [];
+  const totalItems = queryResponse?.count || 0;
+  const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE) || 1;
+
+  // Reset page when searching
   useEffect(() => {
     setPage(1);
   }, [searchTerm]);
 
-  // 2. REALTIME
-  // Escuchamos cambios en perfiles (nuevos usuarios)
+  // 2. REALTIME LISTENERS
+  // Listen for new profiles
   useRealtime("profiles", () => {
-    console.log("⚡ Cambio en profiles -> Recargando lista");
     queryClient.invalidateQueries({ queryKey: ["profiles"] });
   });
-  
-  // Escuchamos cambios en préstamos (para actualizar el contador en vivo)
+
+  // Listen for loan changes (to update active loans count instantly)
   useRealtime("loans", () => {
-    console.log("⚡ Cambio en loans -> Actualizando contadores de usuarios");
     queryClient.invalidateQueries({ queryKey: ["profiles"] });
   });
 
-  // --- LÓGICA DE PAGINACIÓN ---
-  const totalItems = users.length;
-  const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
-  const paginatedUsers = users.slice(
-    (page - 1) * ITEMS_PER_PAGE,
-    page * ITEMS_PER_PAGE
-  );
-
+  // --- HELPERS ---
   const formatDate = (dateString) => {
     if (!dateString) return "N/A";
     return new Date(dateString).toLocaleDateString("es-EC", {
@@ -99,10 +100,10 @@ export default function UsersPage() {
     setImageErrors((prev) => ({ ...prev, [userId]: true }));
   };
 
-  // Helper para contar préstamos activos (Solo status 'ACTIVO')
+  // Helper to count active loans
   const getActiveLoansCount = (user) => {
     if (!user.loans) return 0;
-    return user.loans.filter(l => l.status === 'ACTIVO').length;
+    return user.loans.filter((l) => l.status === "ACTIVO").length;
   };
 
   if (isError) {
@@ -117,7 +118,7 @@ export default function UsersPage() {
 
   return (
     <div className="space-y-6">
-      {/* 1. ENCABEZADO */}
+      {/* 1. HEADER */}
       <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
           <User className="w-5 h-5 text-primary" />
@@ -136,7 +137,7 @@ export default function UsersPage() {
         </div>
       </div>
 
-      {/* 2. TABLA */}
+      {/* 2. TABLE */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
@@ -162,8 +163,8 @@ export default function UsersPage() {
                     </div>
                   </td>
                 </tr>
-              ) : paginatedUsers.length > 0 ? (
-                paginatedUsers.map((user) => {
+              ) : users.length > 0 ? (
+                users.map((user) => {
                   const activeLoans = getActiveLoansCount(user);
                   return (
                     <tr
@@ -205,11 +206,13 @@ export default function UsersPage() {
                           }`}
                         >
                           <Shield className="w-3 h-3" />
-                          {user.role === "admin" ? "Administrador" : "Estudiante"}
+                          {user.role === "admin"
+                            ? "Administrador"
+                            : "Estudiante"}
                         </div>
                       </td>
-                      
-                      {/* DATO DE VALOR: PRÉSTAMOS ACTIVOS */}
+
+                      {/* Active Loans Count */}
                       <td className="px-6 py-4 text-center">
                         {user.role === "admin" ? (
                           <span className="text-gray-300">-</span>
@@ -218,7 +221,9 @@ export default function UsersPage() {
                             <BookOpen className="w-3 h-3" /> {activeLoans}
                           </span>
                         ) : (
-                          <span className="text-xs text-gray-400">Sin libros</span>
+                          <span className="text-xs text-gray-400">
+                            Sin libros
+                          </span>
                         )}
                       </td>
 
@@ -250,11 +255,11 @@ export default function UsersPage() {
           </table>
         </div>
 
-        {/* CONTROLES DE PAGINACIÓN */}
-        {paginatedUsers.length > 0 && totalPages > 1 && (
+        {/* PAGINATION CONTROLS */}
+        {users.length > 0 && totalPages > 1 && (
           <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50">
             <span className="text-xs text-gray-500">
-              Mostrando {paginatedUsers.length} de {totalItems} usuarios
+              Mostrando {users.length} de {totalItems} usuarios
             </span>
             <div className="flex items-center gap-2">
               <button
