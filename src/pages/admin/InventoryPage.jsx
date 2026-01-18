@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "../../api/supabaseClient";
 import { useRealtime } from "../../hooks/useRealtime";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
@@ -22,9 +22,7 @@ export default function InventoryPage() {
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [page, setPage] = useState(1);
 
-  // Paginación de 8 en 8
   const ITEMS_PER_PAGE = 8;
-
   const queryClient = useQueryClient();
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -38,38 +36,36 @@ export default function InventoryPage() {
     category: "",
   });
 
-  // 1. QUERY: LECTURA (FILTRANDO POR SOFT DELETE)
+  // 1. DATA QUERY (Hybrid Pagination Strategy)
   const {
-    data: queryData,
+    data: queryResponse,
     isLoading,
     isError,
     error,
   } = useQuery({
     queryKey: ["books", page, filterStatus, searchTerm],
     queryFn: async () => {
-      // 🟢 CAMBIO IMPORTANTE: Filtramos solo los activos
       let query = supabase
         .from("books")
         .select("*", { count: "exact" })
-        .eq("is_active", true); // <--- SOLO TRAEMOS LOS ACTIVOS
-
-      if (searchTerm) {
-        query = query.or(
-          `title.ilike.%${searchTerm}%,author.ilike.%${searchTerm}%`
-        );
-      }
+        .eq("is_active", true); // Filter only active books (Soft Delete check)
 
       if (filterStatus !== "ALL") {
         query = query.eq("status", filterStatus);
       }
 
-      const from = (page - 1) * ITEMS_PER_PAGE;
-      const to = from + ITEMS_PER_PAGE - 1;
+      // Default Ordering
+      query = query.order("id", { ascending: true });
 
-      const { data, count, error } = await query
-        .range(from, to)
-        .order("id", { ascending: true });
+      // [Pagination Logic]
+      // If NOT searching, use Server-Side Pagination
+      if (!searchTerm) {
+        const from = (page - 1) * ITEMS_PER_PAGE;
+        const to = from + ITEMS_PER_PAGE - 1;
+        query = query.range(from, to);
+      }
 
+      const { data, count, error } = await query;
       if (error) throw error;
       return { data, count };
     },
@@ -77,19 +73,50 @@ export default function InventoryPage() {
     keepPreviousData: true,
   });
 
-  const books = queryData?.data || [];
-  const totalCount = queryData?.count || 0;
+  // Handle Search & Pagination Logic
+  const rawBooks = queryResponse?.data || [];
+  const serverCount = queryResponse?.count || 0;
+
+  let displayBooks = [];
+  let totalCount = 0;
+
+  if (searchTerm) {
+    // Client-Side Search (Fallback for complex OR search)
+    const searchLower = searchTerm.toLowerCase();
+    const filtered = rawBooks.filter((book) => {
+      return (
+        book.title?.toLowerCase().includes(searchLower) ||
+        book.author?.toLowerCase().includes(searchLower)
+      );
+    });
+
+    totalCount = filtered.length;
+    // Manual slice for search results
+    displayBooks = filtered.slice(
+      (page - 1) * ITEMS_PER_PAGE,
+      page * ITEMS_PER_PAGE,
+    );
+  } else {
+    // Server-Side Data (Direct mapping)
+    displayBooks = rawBooks;
+    totalCount = serverCount;
+  }
+
   const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE) || 1;
+
+  // Reset page on filter/search change
+  useEffect(() => {
+    setPage(1);
+  }, [filterStatus, searchTerm]);
 
   const showSuccess = (msg) => {
     closeModals();
     setSuccessMessage(msg);
   };
 
-  // 2. MUTATION: CREAR
+  // 2. MUTATION: CREATE
   const createMutation = useMutation({
     mutationFn: async (newBook) => {
-      // Al crear, por defecto is_active es true desde base de datos
       const { error } = await supabase
         .from("books")
         .insert([{ ...newBook, status: "DISPONIBLE" }]);
@@ -102,7 +129,7 @@ export default function InventoryPage() {
     onError: (err) => alert("Error al crear: " + err.message),
   });
 
-  // 3. MUTATION: EDITAR
+  // 3. MUTATION: UPDATE
   const updateMutation = useMutation({
     mutationFn: async (bookData) => {
       const { error } = await supabase
@@ -123,11 +150,9 @@ export default function InventoryPage() {
     onError: (err) => alert("Error al actualizar: " + err.message),
   });
 
-  // 4. MUTATION: ELIMINAR (AHORA ES SOFT DELETE)
+  // 4. MUTATION: DELETE (SOFT DELETE)
   const deleteMutation = useMutation({
     mutationFn: async (bookId) => {
-      // 🟢 CAMBIO RADICAL: Ya no borramos historial ni usamos DELETE
-      // Solo "apagamos" el libro.
       const { error } = await supabase
         .from("books")
         .update({ is_active: false }) // Soft Delete
@@ -149,7 +174,6 @@ export default function InventoryPage() {
   // --- HANDLERS ---
   const handleSearch = (e) => {
     setSearchTerm(e.target.value);
-    setPage(1);
   };
 
   const openCreateModal = () => {
@@ -213,7 +237,7 @@ export default function InventoryPage() {
 
   return (
     <div className="space-y-6 relative">
-      {/* 1. ENCABEZADO */}
+      {/* 1. HEADER */}
       <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div className="relative w-full md:w-96">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -250,7 +274,7 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {/* 2. TABLA */}
+      {/* 2. TABLE */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
@@ -277,8 +301,8 @@ export default function InventoryPage() {
                     </div>
                   </td>
                 </tr>
-              ) : books.length > 0 ? (
-                books.map((book) => (
+              ) : displayBooks.length > 0 ? (
+                displayBooks.map((book) => (
                   <tr
                     key={book.id}
                     className="hover:bg-gray-50 transition-colors group"
@@ -349,11 +373,11 @@ export default function InventoryPage() {
           </table>
         </div>
 
-        {/* PAGINACIÓN */}
-        {books.length > 0 && totalPages > 1 && (
+        {/* PAGINATION */}
+        {displayBooks.length > 0 && totalPages > 1 && (
           <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50">
             <span className="text-xs text-gray-500">
-              Mostrando {books.length} de {totalCount} libros
+              Mostrando {displayBooks.length} de {totalCount} libros
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -378,9 +402,9 @@ export default function InventoryPage() {
         )}
       </div>
 
-      {/* --- MODALES --- */}
+      {/* --- MODALS --- */}
 
-      {/* 1. MODAL FORMULARIO */}
+      {/* 1. FORM MODAL */}
       {isFormOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden transform transition-all scale-100">
@@ -468,7 +492,7 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {/* 2. MODAL CONFIRMACIÓN ELIMINAR (SOFT DELETE) */}
+      {/* 2. CONFIRM DELETE MODAL (SOFT DELETE) */}
       {deletingBook && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 text-center">
@@ -510,7 +534,7 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {/* 3. MODAL DE ÉXITO */}
+      {/* 3. SUCCESS MODAL */}
       {successMessage && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 text-center">
