@@ -30,7 +30,7 @@ const getCategoryCoverImage = (category) => {
     return "https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=400&q=80";
 
   if (normalized.includes("redes"))
-    return "https://images.unsplash.com/photo-1544197150-b99a580bbcbf?auto=format&fit=crop&w=500&q=80";
+    return "https://images.unsplash.com/photo-1516110833967-0b5716ca1387?auto=format&fit=crop&w=500&q=80";
 
   if (
     normalized.includes("programacion") ||

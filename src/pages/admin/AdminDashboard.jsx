@@ -15,8 +15,42 @@ import {
   CheckSquare,
   Users,
   AlertCircle,
+  Trophy,
 } from "lucide-react";
 
+// 🟢 HELPER: El mismo que usamos en UserCatalog para las imágenes
+const getCategoryCoverImage = (category) => {
+  const normalized = category?.toLowerCase().trim() || "";
+
+  if (normalized.includes("matemática"))
+    return "https://images.unsplash.com/photo-1635070041078-e363dbe005cb?auto=format&fit=crop&w=500&q=80";
+
+  if (normalized.includes("fisica") || normalized.includes("física"))
+    return "https://images.unsplash.com/photo-1636466497217-26a8cbeaf0aa?auto=format&fit=crop&w=500&q=80";
+
+  if (normalized.includes("quimica") || normalized.includes("química"))
+    return "https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=400&q=80";
+
+  if (normalized.includes("redes"))
+    return "https://images.unsplash.com/photo-1516110833967-0b5716ca1387?auto=format&fit=crop&w=500&q=80";
+
+  if (
+    normalized.includes("programacion") ||
+    normalized.includes("programación")
+  )
+    return "https://images.unsplash.com/photo-1587620962725-abab7fe55159?auto=format&fit=crop&w=500&q=80";
+
+  if (normalized.includes("sistemas"))
+    return "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=500&q=80";
+
+  if (normalized.includes("estadistica") || normalized.includes("estadística"))
+    return "https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=500&q=80";
+
+  if (normalized.includes("gestion") || normalized.includes("gestión"))
+    return "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&fit=crop&w=500&q=80";
+
+  return "https://images.unsplash.com/photo-1481627834876-b7833e8f5570?auto=format&fit=crop&w=500&q=80";
+};
 export default function AdminDashboard() {
   const queryClient = useQueryClient();
 
@@ -29,7 +63,7 @@ export default function AdminDashboard() {
   } = useQuery({
     queryKey: ["admin-dashboard"],
     queryFn: async () => {
-      console.log("📡 Actualizando Dashboard (Datos Server-Side)...");
+      // console.log("📡 Actualizando Dashboard...");
 
       const [booksRes, usersRes, activeLoansRes, loansDataRes, topBooksRes] =
         await Promise.all([
@@ -39,11 +73,14 @@ export default function AdminDashboard() {
             .from("loans")
             .select("*", { count: "exact", head: true })
             .eq("status", "ACTIVO"),
-          supabase // Datos para la gráfica de días
+          supabase
             .from("loans")
-            .select("loan_date, status")
+            // 🟢 CORRECCIÓN CRÍTICA: Eliminé 'cover_url' de aquí
+            .select(
+              "loan_date, status, book_id, books(title, author, category)",
+            )
             .order("loan_date", { ascending: false }),
-          supabase.rpc("get_top_books"), // 🟢 RPC ACTUALIZADA (Trae loan_count)
+          supabase.rpc("get_top_books"),
         ]);
 
       if (booksRes.error) throw booksRes.error;
@@ -52,33 +89,36 @@ export default function AdminDashboard() {
       if (loansDataRes.error) throw loansDataRes.error;
       if (topBooksRes.error) throw topBooksRes.error;
 
-      // Procesar Estadísticas
+      // --- Procesar Estadísticas ---
       const totalBooks = booksRes.count || 0;
       const totalUsers = usersRes.count || 0;
       const activeLoans = activeLoansRes.count || 0;
       const availableBooks = totalBooks - activeLoans;
 
-      // Procesar Gráfica
+      // --- Procesar Gráfica ---
       const chartData = processChartData(loansDataRes.data || []);
 
-      // Procesar Top 5 (Ahora es directo, sin cálculos manuales)
+      // --- Procesar Top 5 Global ---
       const topBooks = (topBooksRes.data || []).map((book, index) => ({
         ...book,
         ranking: index + 1,
-        // 🟢 Aquí usamos el dato directo de la BD
         displayCount: book.loan_count || 0,
       }));
+
+      // --- Procesar Líder por Categoría ---
+      const categoryWinners = processCategoryWinners(loansDataRes.data || []);
 
       return {
         stats: { totalBooks, totalUsers, activeLoans, availableBooks },
         chartData,
         topBooks,
+        categoryWinners,
       };
     },
     staleTime: 0,
   });
 
-  // Función auxiliar SOLO para la gráfica de días
+  // Helper: Gráfica
   const processChartData = (loans) => {
     const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const counts = { Sun: 0, Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0 };
@@ -99,7 +139,43 @@ export default function AdminDashboard() {
     }));
   };
 
-  // 2. REALTIME (Se mantiene igual para actualizar al instante)
+  // Helper: Ganadores por Categoría
+  const processCategoryWinners = (loans) => {
+    const categoryMap = {};
+
+    loans.forEach((loan) => {
+      const book = loan.books;
+      if (!book || !book.category) return;
+
+      const cat = book.category;
+      const bookId = loan.book_id;
+
+      if (!categoryMap[cat]) categoryMap[cat] = {};
+
+      if (!categoryMap[cat][bookId]) {
+        categoryMap[cat][bookId] = {
+          ...book,
+          count: 0,
+        };
+      }
+      categoryMap[cat][bookId].count++;
+    });
+
+    // Extraer el ganador de cada categoría
+    const winners = Object.keys(categoryMap).map((category) => {
+      const booksInCategory = Object.values(categoryMap[category]);
+      // Ordenar descendente y tomar el primero
+      const winner = booksInCategory.sort((a, b) => b.count - a.count)[0];
+      return {
+        category,
+        ...winner,
+      };
+    });
+
+    return winners;
+  };
+
+  // 2. REALTIME
   const refreshAll = () => {
     queryClient.invalidateQueries({ queryKey: ["admin-dashboard"] });
   };
@@ -117,6 +193,7 @@ export default function AdminDashboard() {
   };
   const chartData = dashboard?.chartData || [];
   const topBooks = dashboard?.topBooks || [];
+  const categoryWinners = dashboard?.categoryWinners || [];
 
   const statCards = [
     {
@@ -168,8 +245,8 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* TARJETAS */}
+    <div className="space-y-8 pb-10">
+      {/* STATS CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {statCards.map((stat, index) => (
           <div
@@ -191,9 +268,9 @@ export default function AdminDashboard() {
         ))}
       </div>
 
-      {/* GRÁFICAS Y TOP 5 */}
+      {/* CHARTS AND TOP 5 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* GRÁFICA */}
+        {/* CHART */}
         <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
           <h3 className="text-lg font-bold text-gray-800 mb-6">
             Préstamos por Día de la Semana
@@ -232,11 +309,9 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* LISTA TOP 5 */}
+        {/* TOP 5 LIST */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-          <h3 className="text-lg font-bold text-gray-800 mb-6">
-            Top 5 Libros Solicitados
-          </h3>
+          <h3 className="text-lg font-bold text-gray-800 mb-6">Top 5 Global</h3>
           <div className="space-y-6">
             {topBooks.length > 0 ? (
               topBooks.map((book) => (
@@ -257,7 +332,6 @@ export default function AdminDashboard() {
                     </p>
                   </div>
 
-                  {/* 🟢 BADGE CON EL NÚMERO REAL */}
                   <div className="text-xs font-bold text-blue-700 bg-blue-50 px-3 py-1 rounded-full whitespace-nowrap border border-blue-100">
                     {book.displayCount} prest.
                   </div>
@@ -270,6 +344,57 @@ export default function AdminDashboard() {
             )}
           </div>
         </div>
+      </div>
+
+      {/* 🟢 NUEVA SECCIÓN: LÍDERES POR CATEGORÍA */}
+      <div>
+        <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+          <Trophy className="w-6 h-6 text-yellow-500" />
+          Líderes por Categoría
+        </h3>
+        {categoryWinners.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {categoryWinners.map((book, idx) => (
+              <div
+                key={idx}
+                className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col hover:shadow-lg transition-shadow"
+              >
+                <div className="h-32 w-full relative overflow-hidden bg-gray-50">
+                  <img
+                    src={getCategoryCoverImage(book.category)} // 🟢 Usamos el helper aquí
+                    alt={book.title}
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent"></div>
+                  <div className="absolute bottom-3 left-4 right-4">
+                    <span className="inline-block px-2 py-0.5 bg-white/20 backdrop-blur-md text-white text-[10px] font-bold rounded uppercase tracking-wider mb-1">
+                      {book.category}
+                    </span>
+                    <h4
+                      className="text-white font-bold text-sm line-clamp-1"
+                      title={book.title}
+                    >
+                      {book.title}
+                    </h4>
+                  </div>
+                </div>
+                <div className="p-4 flex items-center justify-between">
+                  <p className="text-xs text-gray-500 truncate flex-1 pr-2">
+                    {book.author}
+                  </p>
+                  <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-100 shrink-0">
+                    {book.count} préstamos
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="bg-white p-8 rounded-2xl border border-dashed border-gray-200 text-center text-gray-400">
+            Aún no hay suficientes datos para determinar líderes por categoría.
+          </div>
+        )}
       </div>
     </div>
   );
