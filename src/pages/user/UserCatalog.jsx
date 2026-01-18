@@ -101,14 +101,11 @@ export default function UserCatalog() {
     staleTime: 1000 * 60,
   });
 
-  // 2. QUERY: Top 5 Global (Usando RPC para saltar RLS)
+  // 2. QUERY: Top 5 Global (RPC)
   const { data: topBooks = [] } = useQuery({
     queryKey: ["top-books"],
     queryFn: async () => {
-      // 🟢 CORRECCIÓN: Usamos la función RPC que creamos en Supabase
-      // Esto asegura que el conteo sea GLOBAL y no solo del usuario actual
       const { data, error } = await supabase.rpc("get_top_books");
-
       if (error) {
         console.error("Error fetching top books:", error);
         return [];
@@ -122,10 +119,10 @@ export default function UserCatalog() {
   const totalBooks = queryData?.count || 0;
   const totalPages = Math.ceil(totalBooks / ITEMS_PER_PAGE) || 1;
 
-  // 3. MUTATION: Solicitar Préstamo (MODIFICADO PARA TRAZABILIDAD)
+  // 3. MUTATION: Solicitar Préstamo (CON TRAZABILIDAD Y EMAILS)
   const loanMutation = useMutation({
     mutationFn: async (book) => {
-      // Actualizar estado del libro
+      // A. Actualizar estado del libro
       const { data: updatedBook, error: updateError } = await supabase
         .from("books")
         .update({ status: "PRESTADO" })
@@ -137,7 +134,7 @@ export default function UserCatalog() {
       if (!updatedBook || updatedBook.length === 0)
         throw new Error("ALREADY_TAKEN");
 
-      // Insertar préstamo y RECUPERAR EL ID (Trazabilidad)
+      // B. Insertar préstamo y RECUPERAR EL ID (Trazabilidad)
       const { data: newLoan, error: loanError } = await supabase
         .from("loans")
         .insert([
@@ -148,24 +145,24 @@ export default function UserCatalog() {
             status: "ACTIVO",
           },
         ])
-        .select() // 🟢 Importante: Solicita devolver los datos insertados
-        .single(); // 🟢 Importante: Devuelve un solo objeto
+        .select() // Importante: Recuperar datos insertados
+        .single(); // Devolver objeto único
 
       if (loanError) throw loanError;
-      return newLoan; // 🟢 Retornamos el préstamo creado para usar su ID
+      return newLoan; // Retornamos el préstamo para usar su ID
     },
     onSuccess: async (newLoan, variables) => {
       // newLoan contiene el ID de la transacción
       setBookToRequest(null);
 
-      // 🟢 MOSTRAR CÓDIGO EN PANTALLA
+      // MOSTRAR CÓDIGO EN PANTALLA
       setSuccessMessage(
         `¡Solicitud Exitosa! Tu código de transacción es #${newLoan.id}. Por favor acércate a la biblioteca.`,
       );
 
       const studentName = user.name || user.email;
 
-      // Notificación BD (Con código)
+      // Notificación BD
       await supabase.from("notifications").insert([
         {
           type: "LOAN",
@@ -174,7 +171,7 @@ export default function UserCatalog() {
         },
       ]);
 
-      // Correos (Con código de trazabilidad visible)
+      // Correos (Con código de trazabilidad)
       await sendEmailNotification({
         name: studentName,
         subject: `Confirmación de Préstamo #${newLoan.id} - Biblioteca UCE`,
@@ -184,7 +181,7 @@ export default function UserCatalog() {
         🧾 CÓDIGO DE TRANSACCIÓN: #${newLoan.id}
         ------------------------------------------
         
-        Tienes 24 horas para retirarlo. Presenta este código si es necesario.`,
+        Tienes 24 horas para retirarlo.`,
         target: "student",
       });
 
@@ -197,7 +194,7 @@ export default function UserCatalog() {
         target: "admin",
       });
 
-      // Actualizar todas las vistas
+      // Refrescar datos locales inmediatos (por si acaso el realtime tarda milisegundos)
       queryClient.invalidateQueries({
         queryKey: ["user-notifications", user.id],
       });
@@ -218,15 +215,14 @@ export default function UserCatalog() {
     },
   });
 
-  // 4. REALTIME: Escuchar cambios en libros y PRÉSTAMOS
-  // 🟢 AGREGADO: Escuchamos 'loans' para que el Top 5 cambie en vivo si otro estudiante pide algo
+  // 4. REALTIME (RESTAURADO A LA VERSIÓN "EXCELENTE")
+  // Escuchamos SOLAMENTE "books". Como cada préstamo o devolución cambia el estado del libro,
+  // esto es suficiente para disparar la actualización de todo.
   useRealtime("books", () => {
+    // console.log("⚡ Cambio detectado en libros: Actualizando todo...");
     queryClient.invalidateQueries({ queryKey: ["catalog"] });
     queryClient.invalidateQueries({ queryKey: ["top-books"] });
-  });
-
-  useRealtime("loans", () => {
-    queryClient.invalidateQueries({ queryKey: ["top-books"] }); // Actualiza el top si hay nuevos préstamos
+    queryClient.invalidateQueries({ queryKey: ["my-loans"] }); // Agregado para que tus préstamos se actualicen solos
   });
 
   const handleRequestClick = (book) => {
