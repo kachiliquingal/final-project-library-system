@@ -15,7 +15,7 @@ import {
   ChevronRight,
   ArrowUp,
   ArrowDown,
-  Hash, // 🟢 Icono para el ID
+  Hash,
 } from "lucide-react";
 
 export default function LoansPage() {
@@ -27,23 +27,22 @@ export default function LoansPage() {
   const ITEMS_PER_PAGE = 8;
   const queryClient = useQueryClient();
 
-  // --- ESTADOS PARA MODALES ---
+  // --- MODAL STATES ---
   const [loanToReturn, setLoanToReturn] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
 
-  // 1. QUERY DE DATOS
+  // 1. DATA QUERY (Server-Side Pagination Strategy)
   const {
-    data: loans = [],
+    data: queryResponse,
     isLoading,
     isError,
     error,
   } = useQuery({
-    queryKey: ["loans", filter],
+    queryKey: ["loans", page, filter, sortOrder, searchTerm], // Added dependencies to trigger re-fetch
     queryFn: async () => {
-      let query = supabase
-        .from("loans")
-        .select(
-          `
+      // Base query with count
+      let query = supabase.from("loans").select(
+        `
           id,
           loan_date,
           return_date,
@@ -53,20 +52,73 @@ export default function LoansPage() {
           books ( title, author, category ),
           profiles ( full_name, email )
         `,
-        )
-        .order("loan_date", { ascending: false });
+        { count: "exact" },
+      );
 
+      // Apply Filter (Status)
       if (filter !== "ALL") {
         query = query.eq("status", filter);
       }
 
-      const { data, error } = await query;
+      // Apply Server-Side Sorting
+      query = query.order("loan_date", { ascending: sortOrder === "asc" });
+
+      // [Pagination Logic]
+      // If NOT searching, use Server-Side Pagination (Engineers Preference)
+      // If searching, fetch all matching status to allow Client-Side filtering (Complex Join Search)
+      if (!searchTerm) {
+        const from = (page - 1) * ITEMS_PER_PAGE;
+        const to = from + ITEMS_PER_PAGE - 1;
+        query = query.range(from, to);
+      }
+
+      const { data, count, error } = await query;
       if (error) throw error;
-      return data;
+
+      return { data, count };
     },
-    staleTime: 0,
+    keepPreviousData: true,
+    staleTime: 0, // Ensure fresh data for admin
   });
 
+  // Handle Search & Pagination Logic
+  // If searchTerm exists, we filter the raw data client-side.
+  // If no searchTerm, we use the server-paginated data directly.
+  const rawLoans = queryResponse?.data || [];
+  const serverCount = queryResponse?.count || 0;
+
+  let displayLoans = [];
+  let totalItems = 0;
+
+  if (searchTerm) {
+    // Client-Side Search (Fallback for complex joins)
+    const searchLower = searchTerm.toLowerCase();
+    const filtered = rawLoans.filter((loan) => {
+      const bookTitle = loan.books?.title?.toLowerCase() || "";
+      const userName = loan.profiles?.full_name?.toLowerCase() || "";
+      const loanId = loan.id.toString();
+      return (
+        bookTitle.includes(searchLower) ||
+        userName.includes(searchLower) ||
+        loanId.includes(searchLower)
+      );
+    });
+
+    totalItems = filtered.length;
+    // Manual slice for search results
+    displayLoans = filtered.slice(
+      (page - 1) * ITEMS_PER_PAGE,
+      page * ITEMS_PER_PAGE,
+    );
+  } else {
+    // Server-Side Data (Direct mapping)
+    displayLoans = rawLoans;
+    totalItems = serverCount;
+  }
+
+  const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE) || 1;
+
+  // Reset page on filter/search change
   useEffect(() => {
     setPage(1);
   }, [filter, searchTerm, sortOrder]);
@@ -75,9 +127,10 @@ export default function LoansPage() {
     setSortOrder((prev) => (prev === "desc" ? "asc" : "desc"));
   };
 
-  // 2. MUTATION: DEVOLVER LIBRO
+  // 2. MUTATION: RETURN BOOK
   const returnMutation = useMutation({
     mutationFn: async (loan) => {
+      // Update Loan Status
       const { error: loanError } = await supabase
         .from("loans")
         .update({
@@ -88,6 +141,7 @@ export default function LoansPage() {
 
       if (loanError) throw loanError;
 
+      // Update Book Status
       const { error: bookError } = await supabase
         .from("books")
         .update({ status: "DISPONIBLE" })
@@ -99,7 +153,7 @@ export default function LoansPage() {
       const studentName = loan.profiles?.full_name || "Estudiante";
       const bookTitle = loan.books?.title || "Libro";
 
-      // 1. Notificación BD (Con ID de Trazabilidad)
+      // DB Notification (Traceability)
       await supabase.from("notifications").insert([
         {
           type: "RETURN",
@@ -108,7 +162,7 @@ export default function LoansPage() {
         },
       ]);
 
-      // 2. CORREO ESTUDIANTE (Con ID de Trazabilidad)
+      // Email Student (Traceability)
       await sendEmailNotification({
         name: studentName,
         subject: `Constancia de Devolución #${loan.id} - Biblioteca UCE`,
@@ -121,7 +175,7 @@ export default function LoansPage() {
         target: "student",
       });
 
-      // 3. CORREO ADMIN (Con ID de Trazabilidad)
+      // Email Admin (Traceability)
       await sendEmailNotification({
         name: "Administrador",
         subject: `✅ Devolución #${loan.id} Procesada (Sistema)`,
@@ -131,11 +185,11 @@ export default function LoansPage() {
         target: "admin",
       });
 
+      // Refresh Data
       queryClient.invalidateQueries({ queryKey: ["loans"] });
       queryClient.invalidateQueries({ queryKey: ["books"] });
       queryClient.invalidateQueries({ queryKey: ["catalog"] });
 
-      // Cerrar confirmación y mostrar éxito
       setLoanToReturn(null);
       setSuccessMessage(
         `Préstamo #${loan.id} finalizado correctamente. Constancias enviadas.`,
@@ -146,6 +200,7 @@ export default function LoansPage() {
     },
   });
 
+  // Realtime Listener
   useRealtime("loans", () => {
     queryClient.invalidateQueries({ queryKey: ["loans"] });
   });
@@ -161,33 +216,7 @@ export default function LoansPage() {
     }
   };
 
-  // --- VISUALIZACIÓN ---
-  const filteredLoans = loans.filter((loan) => {
-    if (!searchTerm) return true;
-    const searchLower = searchTerm.toLowerCase();
-    const bookTitle = loan.books?.title?.toLowerCase() || "";
-    const userName = loan.profiles?.full_name?.toLowerCase() || "";
-    const loanId = loan.id.toString(); // Permitir búsqueda por ID
-    return (
-      bookTitle.includes(searchLower) ||
-      userName.includes(searchLower) ||
-      loanId.includes(searchLower)
-    );
-  });
-
-  const sortedLoans = [...filteredLoans].sort((a, b) => {
-    const dateA = new Date(a.loan_date);
-    const dateB = new Date(b.loan_date);
-    return sortOrder === "asc" ? dateA - dateB : dateB - dateA;
-  });
-
-  const totalItems = sortedLoans.length;
-  const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
-  const paginatedLoans = sortedLoans.slice(
-    (page - 1) * ITEMS_PER_PAGE,
-    page * ITEMS_PER_PAGE,
-  );
-
+  // --- FORMATTER ---
   const formatDate = (dateString) => {
     if (!dateString) return "-";
     return new Date(dateString).toLocaleDateString("es-EC", {
@@ -240,13 +269,12 @@ export default function LoansPage() {
         </div>
       </div>
 
-      {/* TABLA */}
+      {/* TABLE */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100 text-xs uppercase text-gray-500 font-semibold tracking-wider">
-                {/* 🟢 NUEVA COLUMNA ID */}
                 <th className="px-6 py-4 w-16 text-center">
                   <div className="flex items-center justify-center gap-1">
                     <Hash className="w-3 h-3" /> ID
@@ -286,13 +314,13 @@ export default function LoansPage() {
                     </div>
                   </td>
                 </tr>
-              ) : paginatedLoans.length > 0 ? (
-                paginatedLoans.map((loan) => (
+              ) : displayLoans.length > 0 ? (
+                displayLoans.map((loan) => (
                   <tr
                     key={loan.id}
                     className="hover:bg-gray-50 transition-colors"
                   >
-                    {/* 🟢 VISUALIZACIÓN DEL ID */}
+                    {/* ID Display */}
                     <td className="px-6 py-4 text-xs font-mono font-bold text-gray-400 text-center">
                       #{loan.id}
                     </td>
@@ -382,11 +410,11 @@ export default function LoansPage() {
           </table>
         </div>
 
-        {/* PAGINACIÓN */}
-        {paginatedLoans.length > 0 && totalPages > 1 && (
+        {/* PAGINATION CONTROLS */}
+        {totalItems > 0 && totalPages > 1 && (
           <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50">
             <span className="text-xs text-gray-500">
-              Mostrando {paginatedLoans.length} de {totalItems} registros
+              Mostrando {displayLoans.length} de {totalItems} registros
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -411,9 +439,7 @@ export default function LoansPage() {
         )}
       </div>
 
-      {/* --- MODALES --- */}
-
-      {/* 1. MODAL CONFIRMACIÓN DEVOLUCIÓN */}
+      {/* --- CONFIRMATION MODAL --- */}
       {loanToReturn && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 text-center">
@@ -455,7 +481,7 @@ export default function LoansPage() {
         </div>
       )}
 
-      {/* 2. MODAL DE ÉXITO */}
+      {/* --- SUCCESS MODAL --- */}
       {successMessage && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 text-center">
