@@ -2,6 +2,7 @@ import { useState } from "react";
 import { supabase } from "../../api/supabaseClient";
 import { useAuth } from "../../context/AuthContext";
 import { useRealtime } from "../../hooks/useRealtime";
+import { useDebounce } from "../../hooks/useDebounce";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { sendEmailNotification } from "../../api/emailService";
 import {
@@ -19,10 +20,9 @@ import {
   X,
 } from "lucide-react";
 
-// 🟢 MAPA DE COLORES POR CATEGORÍA
+// ... (El mapa de colores se mantiene igual)
 const getCategoryColor = (category) => {
   const normalizedCategory = category?.toLowerCase().trim() || "";
-
   if (
     normalizedCategory.includes("matemática") ||
     normalizedCategory.includes("calculo")
@@ -54,7 +54,6 @@ const getCategoryColor = (category) => {
     normalizedCategory.includes("eléctrica")
   )
     return "from-amber-500 to-orange-600";
-
   return "from-gray-500 to-slate-600";
 };
 
@@ -63,6 +62,9 @@ export default function UserCatalog() {
   const queryClient = useQueryClient();
 
   const [searchTerm, setSearchTerm] = useState("");
+  // 🟢 2. Creamos el valor con retraso (500ms) para no saturar la BD
+  const debouncedSearchTerm = useDebounce(searchTerm, 500);
+
   const [page, setPage] = useState(1);
   const ITEMS_PER_PAGE = 8;
 
@@ -70,20 +72,22 @@ export default function UserCatalog() {
   const [bookToRequest, setBookToRequest] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
 
-  // 1. QUERY: Catálogo (Libros Paginados)
+  // 1. QUERY: Catálogo (Paginado Server-Side)
   const {
     data: queryData,
     isLoading,
     isError,
     error,
   } = useQuery({
-    queryKey: ["catalog", page, searchTerm],
+    // 🟢 3. Usamos debouncedSearchTerm en la Key para que espere antes de re-ejecutar
+    queryKey: ["catalog", page, debouncedSearchTerm],
     queryFn: async () => {
       let query = supabase.from("books").select("*", { count: "exact" });
 
-      if (searchTerm) {
+      // 🟢 4. Filtramos usando el valor debounced
+      if (debouncedSearchTerm) {
         query = query.or(
-          `title.ilike.%${searchTerm}%,author.ilike.%${searchTerm}%,category.ilike.%${searchTerm}%`,
+          `title.ilike.%${debouncedSearchTerm}%,author.ilike.%${debouncedSearchTerm}%,category.ilike.%${debouncedSearchTerm}%`,
         );
       }
 
@@ -101,7 +105,7 @@ export default function UserCatalog() {
     staleTime: 1000 * 60,
   });
 
-  // 2. QUERY: Top 5 Global (RPC)
+  // 2. QUERY: Top 5 Global
   const { data: topBooks = [] } = useQuery({
     queryKey: ["top-books"],
     queryFn: async () => {
@@ -119,10 +123,9 @@ export default function UserCatalog() {
   const totalBooks = queryData?.count || 0;
   const totalPages = Math.ceil(totalBooks / ITEMS_PER_PAGE) || 1;
 
-  // 3. MUTATION: Solicitar Préstamo (CON TRAZABILIDAD Y EMAILS)
+  // 3. MUTATION: Solicitar Préstamo
   const loanMutation = useMutation({
     mutationFn: async (book) => {
-      // A. Actualizar estado del libro
       const { data: updatedBook, error: updateError } = await supabase
         .from("books")
         .update({ status: "PRESTADO" })
@@ -134,7 +137,6 @@ export default function UserCatalog() {
       if (!updatedBook || updatedBook.length === 0)
         throw new Error("ALREADY_TAKEN");
 
-      // B. Insertar préstamo y RECUPERAR EL ID (Trazabilidad)
       const { data: newLoan, error: loanError } = await supabase
         .from("loans")
         .insert([
@@ -145,24 +147,20 @@ export default function UserCatalog() {
             status: "ACTIVO",
           },
         ])
-        .select() // Importante: Recuperar datos insertados
-        .single(); // Devolver objeto único
+        .select()
+        .single();
 
       if (loanError) throw loanError;
-      return newLoan; // Retornamos el préstamo para usar su ID
+      return newLoan;
     },
     onSuccess: async (newLoan, variables) => {
-      // newLoan contiene el ID de la transacción
       setBookToRequest(null);
-
-      // MOSTRAR CÓDIGO EN PANTALLA
       setSuccessMessage(
         `¡Solicitud Exitosa! Tu código de transacción es #${newLoan.id}. Por favor acércate a la biblioteca.`,
       );
 
       const studentName = user.name || user.email;
 
-      // Notificación BD
       await supabase.from("notifications").insert([
         {
           type: "LOAN",
@@ -171,7 +169,6 @@ export default function UserCatalog() {
         },
       ]);
 
-      // Correos (Con código de trazabilidad)
       await sendEmailNotification({
         name: studentName,
         subject: `Confirmación de Préstamo #${newLoan.id} - Biblioteca UCE`,
@@ -194,7 +191,6 @@ export default function UserCatalog() {
         target: "admin",
       });
 
-      // Refrescar datos locales inmediatos (por si acaso el realtime tarda milisegundos)
       queryClient.invalidateQueries({
         queryKey: ["user-notifications", user.id],
       });
@@ -215,14 +211,11 @@ export default function UserCatalog() {
     },
   });
 
-  // 4. REALTIME (RESTAURADO A LA VERSIÓN "EXCELENTE")
-  // Escuchamos SOLAMENTE "books". Como cada préstamo o devolución cambia el estado del libro,
-  // esto es suficiente para disparar la actualización de todo.
+  // 4. REALTIME (Manteniendo la lógica que funciona)
   useRealtime("books", () => {
-    // console.log("⚡ Cambio detectado en libros: Actualizando todo...");
     queryClient.invalidateQueries({ queryKey: ["catalog"] });
     queryClient.invalidateQueries({ queryKey: ["top-books"] });
-    queryClient.invalidateQueries({ queryKey: ["my-loans"] }); // Agregado para que tus préstamos se actualicen solos
+    queryClient.invalidateQueries({ queryKey: ["my-loans"] });
   });
 
   const handleRequestClick = (book) => {
@@ -236,8 +229,8 @@ export default function UserCatalog() {
   };
 
   const handleSearch = (e) => {
-    setSearchTerm(e.target.value);
-    setPage(1);
+    setSearchTerm(e.target.value); // El input sigue siendo reactivo inmediato
+    setPage(1); // Reseteamos página, pero la petición real esperará al debounce
   };
 
   if (isError) {
@@ -278,8 +271,8 @@ export default function UserCatalog() {
       </div>
 
       <div className="space-y-12">
-        {/* 2. SECCIÓN TOP 5 */}
-        {!searchTerm && topBooks.length > 0 && (
+        {/* 2. SECCIÓN TOP 5 (Se oculta al buscar, usando debouncedSearchTerm para evitar parpadeos) */}
+        {!debouncedSearchTerm && topBooks.length > 0 && (
           <section>
             <div className="flex items-center gap-2 mb-6">
               <div className="p-2 bg-yellow-50 rounded-lg text-yellow-600">
@@ -301,7 +294,6 @@ export default function UserCatalog() {
                     Top {idx + 1}
                   </div>
 
-                  {/* PORTADA TEMÁTICA */}
                   <div
                     className={`h-36 w-full bg-gradient-to-br ${getCategoryColor(book.category)} p-5 flex items-end relative overflow-hidden transition-colors duration-500`}
                   >
@@ -315,8 +307,6 @@ export default function UserCatalog() {
                     <p className="text-xs text-gray-500 truncate mb-3">
                       {book.author}
                     </p>
-
-                    {/* BOTÓN UNIFICADO */}
                     <button
                       onClick={() => handleRequestClick(book)}
                       disabled={book.status !== "DISPONIBLE"}
@@ -324,7 +314,7 @@ export default function UserCatalog() {
                         ${
                           book.status === "DISPONIBLE"
                             ? "bg-gray-900 text-white hover:bg-emerald-600 hover:shadow-lg hover:shadow-emerald-600/20 active:scale-95"
-                            : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                            : "bg-gray-100 text-gray-400 cursor-not-allowed border-gray-100"
                         }`}
                     >
                       {book.status === "DISPONIBLE" ? "Solicitar" : "Ocupado"}
@@ -365,7 +355,7 @@ export default function UserCatalog() {
                   disabled={page === totalPages}
                   className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-50 disabled:opacity-30 transition-all text-gray-600"
                 >
-                  <ChevronRight className="w-6 h-6" />
+                  <ChevronRight className="w-5 h-5" />
                 </button>
               </div>
             )}
@@ -387,7 +377,6 @@ export default function UserCatalog() {
                   key={book.id}
                   className="bg-white rounded-2xl border border-gray-100 overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col group"
                 >
-                  {/* PORTADA CON COLOR POR CATEGORÍA */}
                   <div
                     className={`h-48 bg-gradient-to-br ${getCategoryColor(book.category)} relative p-6 flex flex-col justify-between transition-colors duration-500`}
                   >
@@ -395,7 +384,6 @@ export default function UserCatalog() {
                       <BookOpen className="w-24 h-24 text-white rotate-12" />
                     </div>
 
-                    {/* BADGE DE ESTADO */}
                     <div className="self-start relative z-10">
                       {book.status === "DISPONIBLE" ? (
                         <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-extrabold bg-white text-emerald-600 shadow-lg tracking-wide uppercase">
@@ -413,7 +401,6 @@ export default function UserCatalog() {
                     </h3>
                   </div>
 
-                  {/* INFO */}
                   <div className="p-6 flex-1 flex flex-col">
                     <div className="flex-1 space-y-2">
                       <p className="text-gray-500 text-sm font-medium flex items-center gap-2">
@@ -425,7 +412,6 @@ export default function UserCatalog() {
                       </span>
                     </div>
 
-                    {/* BOTÓN DE ACCIÓN UNIFICADO */}
                     <button
                       onClick={() => handleRequestClick(book)}
                       disabled={
@@ -465,7 +451,6 @@ export default function UserCatalog() {
             </div>
           )}
 
-          {/* PAGINACIÓN INFERIOR */}
           {totalPages > 1 && (
             <div className="mt-12 flex justify-center">
               <div className="bg-white p-2 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-3">
@@ -493,8 +478,6 @@ export default function UserCatalog() {
       </div>
 
       {/* --- MODALES --- */}
-
-      {/* 1. MODAL CONFIRMACIÓN */}
       {bookToRequest && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden p-8 text-center transform transition-all scale-100">
@@ -535,7 +518,6 @@ export default function UserCatalog() {
         </div>
       )}
 
-      {/* 2. MODAL DE ÉXITO */}
       {successMessage && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden p-8 text-center">

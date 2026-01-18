@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../api/supabaseClient";
 import { useRealtime } from "../../hooks/useRealtime";
+import { useDebounce } from "../../hooks/useDebounce";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { sendEmailNotification } from "../../api/emailService";
 import {
@@ -20,6 +21,9 @@ import {
 
 export default function LoansPage() {
   const [searchTerm, setSearchTerm] = useState("");
+  // 🟢 2. Create debounced value (500ms)
+  const debouncedSearchTerm = useDebounce(searchTerm, 500);
+
   const [filter, setFilter] = useState("ALL");
   const [page, setPage] = useState(1);
   const [sortOrder, setSortOrder] = useState("desc");
@@ -31,14 +35,15 @@ export default function LoansPage() {
   const [loanToReturn, setLoanToReturn] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
 
-  // 1. DATA QUERY (Server-Side Pagination Strategy)
+  // 1. DATA QUERY (Hybrid Server-Side Pagination Strategy)
   const {
     data: queryResponse,
     isLoading,
     isError,
     error,
   } = useQuery({
-    queryKey: ["loans", page, filter, sortOrder, searchTerm], // Added dependencies to trigger re-fetch
+    // 🟢 3. Use debouncedSearchTerm in queryKey
+    queryKey: ["loans", page, filter, sortOrder, debouncedSearchTerm],
     queryFn: async () => {
       // Base query with count
       let query = supabase.from("loans").select(
@@ -64,9 +69,9 @@ export default function LoansPage() {
       query = query.order("loan_date", { ascending: sortOrder === "asc" });
 
       // [Pagination Logic]
-      // If NOT searching, use Server-Side Pagination (Engineers Preference)
+      // If NOT searching (debouncedSearchTerm is empty), use Server-Side Pagination
       // If searching, fetch all matching status to allow Client-Side filtering (Complex Join Search)
-      if (!searchTerm) {
+      if (!debouncedSearchTerm) {
         const from = (page - 1) * ITEMS_PER_PAGE;
         const to = from + ITEMS_PER_PAGE - 1;
         query = query.range(from, to);
@@ -82,17 +87,16 @@ export default function LoansPage() {
   });
 
   // Handle Search & Pagination Logic
-  // If searchTerm exists, we filter the raw data client-side.
-  // If no searchTerm, we use the server-paginated data directly.
   const rawLoans = queryResponse?.data || [];
   const serverCount = queryResponse?.count || 0;
 
   let displayLoans = [];
   let totalItems = 0;
 
-  if (searchTerm) {
+  // 🟢 4. Use debouncedSearchTerm for filtering
+  if (debouncedSearchTerm) {
     // Client-Side Search (Fallback for complex joins)
-    const searchLower = searchTerm.toLowerCase();
+    const searchLower = debouncedSearchTerm.toLowerCase();
     const filtered = rawLoans.filter((loan) => {
       const bookTitle = loan.books?.title?.toLowerCase() || "";
       const userName = loan.profiles?.full_name?.toLowerCase() || "";
@@ -121,7 +125,7 @@ export default function LoansPage() {
   // Reset page on filter/search change
   useEffect(() => {
     setPage(1);
-  }, [filter, searchTerm, sortOrder]);
+  }, [filter, debouncedSearchTerm, sortOrder]);
 
   const toggleSort = () => {
     setSortOrder((prev) => (prev === "desc" ? "asc" : "desc"));
@@ -226,6 +230,10 @@ export default function LoansPage() {
     });
   };
 
+  const handleSearch = (e) => {
+    setSearchTerm(e.target.value);
+  };
+
   if (isError) {
     return (
       <div className="p-8 text-center text-red-500 bg-red-50 rounded-xl border border-red-100">
@@ -262,7 +270,7 @@ export default function LoansPage() {
               type="text"
               placeholder="Buscar por Libro, Estudiante o ID..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={handleSearch}
               className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
             />
           </div>
@@ -275,6 +283,7 @@ export default function LoansPage() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100 text-xs uppercase text-gray-500 font-semibold tracking-wider">
+                {/* ID Column */}
                 <th className="px-6 py-4 w-16 text-center">
                   <div className="flex items-center justify-center gap-1">
                     <Hash className="w-3 h-3" /> ID

@@ -136,7 +136,6 @@ export const AuthProvider = ({ children }) => {
     });
 
     if (error) throw error;
-    // 🟢 ELIMINADO: Ya no creamos la notificación aquí manualmente.
     return data;
   };
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../api/supabaseClient";
 import { useRealtime } from "../../hooks/useRealtime";
+import { useDebounce } from "../../hooks/useDebounce";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Search,
@@ -16,20 +17,24 @@ import {
 
 export default function UsersPage() {
   const [searchTerm, setSearchTerm] = useState("");
+  // 🟢 2. Create debounced value (500ms)
+  const debouncedSearchTerm = useDebounce(searchTerm, 500);
+
   const [imageErrors, setImageErrors] = useState({});
   const [page, setPage] = useState(1);
   const ITEMS_PER_PAGE = 8;
 
   const queryClient = useQueryClient();
 
-  // 1. QUERY: Server-Side Pagination & Search
+  // 1. QUERY: Server-Side Pagination & Search (with Debounce)
   const {
     data: queryResponse,
     isLoading,
     isError,
     error,
   } = useQuery({
-    queryKey: ["profiles", page, searchTerm], // Dependency on page triggers refetch
+    // 🟢 3. Use debouncedSearchTerm in queryKey
+    queryKey: ["profiles", page, debouncedSearchTerm],
     queryFn: async () => {
       // Base query including active loans count
       let query = supabase
@@ -46,10 +51,10 @@ export default function UsersPage() {
         )
         .order("created_at", { ascending: false });
 
-      // Server-Side Search
-      if (searchTerm) {
+      // 🟢 4. Use debouncedSearchTerm for Server-Side Search
+      if (debouncedSearchTerm) {
         query = query.or(
-          `full_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`,
+          `full_name.ilike.%${debouncedSearchTerm}%,email.ilike.%${debouncedSearchTerm}%`,
         );
       }
 
@@ -73,7 +78,7 @@ export default function UsersPage() {
   // Reset page when searching
   useEffect(() => {
     setPage(1);
-  }, [searchTerm]);
+  }, [debouncedSearchTerm]);
 
   // 2. REALTIME LISTENERS
   // Listen for new profiles
@@ -130,7 +135,7 @@ export default function UsersPage() {
           <input
             type="text"
             placeholder="Buscar por nombre o correo..."
-            value={searchTerm}
+            value={searchTerm} // Input remains responsive
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
           />

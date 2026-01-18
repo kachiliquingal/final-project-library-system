@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../api/supabaseClient";
 import { useRealtime } from "../../hooks/useRealtime";
+import { useDebounce } from "../../hooks/useDebounce";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
   Search,
@@ -19,12 +20,16 @@ import {
 
 export default function InventoryPage() {
   const [searchTerm, setSearchTerm] = useState("");
+  // Debounced (500ms)
+  const debouncedSearchTerm = useDebounce(searchTerm, 500);
+
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [page, setPage] = useState(1);
 
   const ITEMS_PER_PAGE = 8;
   const queryClient = useQueryClient();
 
+  // ... (Estados de modales y formulario se mantienen igual)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [editingBook, setEditingBook] = useState(null);
   const [deletingBook, setDeletingBook] = useState(null);
@@ -36,19 +41,20 @@ export default function InventoryPage() {
     category: "",
   });
 
-  // 1. DATA QUERY (Hybrid Pagination Strategy)
+  // 1. DATA QUERY (Hybrid Pagination + Debounced Search)
   const {
     data: queryResponse,
     isLoading,
     isError,
     error,
   } = useQuery({
-    queryKey: ["books", page, filterStatus, searchTerm],
+    // 🟢 3. Usar debouncedSearchTerm en la clave
+    queryKey: ["books", page, filterStatus, debouncedSearchTerm],
     queryFn: async () => {
       let query = supabase
         .from("books")
         .select("*", { count: "exact" })
-        .eq("is_active", true); // Filter only active books (Soft Delete check)
+        .eq("is_active", true);
 
       if (filterStatus !== "ALL") {
         query = query.eq("status", filterStatus);
@@ -58,8 +64,9 @@ export default function InventoryPage() {
       query = query.order("id", { ascending: true });
 
       // [Pagination Logic]
-      // If NOT searching, use Server-Side Pagination
-      if (!searchTerm) {
+      // Si NO estamos buscando (debouncedSearchTerm vacío), usamos paginación del servidor.
+      // Si SÍ estamos buscando, traemos todo lo que coincida para filtrar (lógica híbrida actual).
+      if (!debouncedSearchTerm) {
         const from = (page - 1) * ITEMS_PER_PAGE;
         const to = from + ITEMS_PER_PAGE - 1;
         query = query.range(from, to);
@@ -80,9 +87,10 @@ export default function InventoryPage() {
   let displayBooks = [];
   let totalCount = 0;
 
-  if (searchTerm) {
-    // Client-Side Search (Fallback for complex OR search)
-    const searchLower = searchTerm.toLowerCase();
+  // 🟢 4. Usar debouncedSearchTerm para el filtrado
+  if (debouncedSearchTerm) {
+    // Client-Side Search (Fallback for complex OR search if not server-side)
+    const searchLower = debouncedSearchTerm.toLowerCase();
     const filtered = rawBooks.filter((book) => {
       return (
         book.title?.toLowerCase().includes(searchLower) ||
@@ -91,7 +99,6 @@ export default function InventoryPage() {
     });
 
     totalCount = filtered.length;
-    // Manual slice for search results
     displayBooks = filtered.slice(
       (page - 1) * ITEMS_PER_PAGE,
       page * ITEMS_PER_PAGE,
@@ -107,7 +114,7 @@ export default function InventoryPage() {
   // Reset page on filter/search change
   useEffect(() => {
     setPage(1);
-  }, [filterStatus, searchTerm]);
+  }, [filterStatus, debouncedSearchTerm]);
 
   const showSuccess = (msg) => {
     closeModals();
@@ -155,7 +162,7 @@ export default function InventoryPage() {
     mutationFn: async (bookId) => {
       const { error } = await supabase
         .from("books")
-        .update({ is_active: false }) // Soft Delete
+        .update({ is_active: false })
         .eq("id", bookId);
 
       if (error) throw error;
