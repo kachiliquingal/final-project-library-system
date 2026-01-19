@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { supabase } from "../../api/supabaseClient";
 import { useAuth } from "../../context/AuthContext";
 import { useRealtime } from "../../hooks/useRealtime";
-import { useQuery, useQueryClient } from "@tanstack/react-query"; 
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { exportToPDF } from "../../utils/reportGenerator";
 import {
   Clock,
   Calendar,
@@ -10,14 +11,15 @@ import {
   CheckCircle,
   AlertCircle,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Download,
 } from "lucide-react";
 
 export default function UserLoans() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState("active");
-  
-  // PAGINACIÓN
+
+  // PAGINATION
   const [page, setPage] = useState(1);
   const ITEMS_PER_PAGE = 3;
 
@@ -33,7 +35,7 @@ export default function UserLoans() {
     queryKey: ["my-loans", user?.id],
     queryFn: async () => {
       if (!user) return [];
-      
+
       const { data, error } = await supabase
         .from("loans")
         .select(
@@ -44,7 +46,7 @@ export default function UserLoans() {
           status,
           user_id, 
           books ( title, author, category, id )
-        `
+        `,
         )
         .eq("user_id", user.id)
         .order("loan_date", { ascending: false });
@@ -64,7 +66,7 @@ export default function UserLoans() {
     }
   });
 
-  // 3. RESETEAR PAGINACIÓN AL CAMBIAR TAB
+  // 3. RESET PAGINATION ON TAB CHANGE
   useEffect(() => {
     setPage(1);
   }, [activeTab]);
@@ -78,28 +80,67 @@ export default function UserLoans() {
     });
   };
 
-  // --- LÓGICA DE FILTRADO Y PAGINACIÓN ---
-  
-  // 1. Separar listas
+  // --- FILTERING AND PAGINATION LOGIC ---
+
+  // 1. Separate lists
   const activeLoans = loans.filter((loan) => loan.status === "ACTIVO");
   const historyLoans = loans.filter((loan) => loan.status !== "ACTIVO");
-  
-  // 2. Determinar lista actual
+
+  // 2. Determine current list
   const currentList = activeTab === "active" ? activeLoans : historyLoans;
 
-  // 3. Calcular paginación sobre la lista actual
+  // 3. Calculate pagination on the current list
   const totalItems = currentList.length;
   const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
-  
+
   const displayLoans = currentList.slice(
     (page - 1) * ITEMS_PER_PAGE,
-    page * ITEMS_PER_PAGE
+    page * ITEMS_PER_PAGE,
   );
 
+  // 4. EXPORT REPORT (Student)
+  const handleExport = () => {
+    if (currentList.length === 0) {
+      alert("No hay datos para exportar en esta sección.");
+      return;
+    }
+
+    const title =
+      activeTab === "active"
+        ? "Reporte de Préstamos Activos"
+        : "Historial de Libros Devueltos";
+
+    const columns = [
+      { header: "Libro", accessor: "book_title" },
+      { header: "Autor", accessor: "book_author" },
+      { header: "Fecha Préstamo", accessor: "loan_date" },
+      { header: "Estado", accessor: "status_text" },
+    ];
+
+    // If it's history, add return date
+    if (activeTab === "history") {
+      columns.splice(3, 0, {
+        header: "Fecha Devolución",
+        accessor: "return_date",
+      });
+    }
+
+    const dataToExport = currentList.map((loan) => ({
+      book_title: loan.books?.title || "Desconocido",
+      book_author: loan.books?.author || "-",
+      loan_date: new Date(loan.loan_date).toLocaleDateString("es-EC"),
+      return_date: loan.return_date
+        ? new Date(loan.return_date).toLocaleDateString("es-EC")
+        : "-",
+      status_text: loan.status === "ACTIVO" ? "En Curso" : "Devuelto",
+    }));
+
+    exportToPDF(dataToExport, title, columns);
+  };
+
   return (
-    <div className="space-y-8 w-full"> {/* 🟢 Eliminado max-w-5xl para usar todo el ancho */}
-      
-      {/* 1. HEADER DE PERFIL */}
+    <div className="space-y-8 w-full">
+      {/* PROFILE HEADER */}
       <div className="bg-gradient-to-r from-gray-900 to-blue-900 rounded-2xl p-8 text-white shadow-xl flex flex-col md:flex-row items-center gap-6">
         <div className="w-20 h-20 bg-white/10 rounded-full flex items-center justify-center text-3xl font-bold border-2 border-white/20">
           {user?.name?.charAt(0).toUpperCase() || "U"}
@@ -126,37 +167,50 @@ export default function UserLoans() {
         </div>
       </div>
 
-      {/* 2. TABS DE NAVEGACIÓN */}
-      <div className="flex border-b border-gray-200">
-        <button
-          onClick={() => setActiveTab("active")}
-          className={`pb-4 px-6 text-sm font-medium transition-all relative ${
-            activeTab === "active"
-              ? "text-primary"
-              : "text-gray-500 hover:text-gray-700"
-          }`}
-        >
-          Préstamos Activos
-          {activeTab === "active" && (
-            <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-t-full"></div>
-          )}
-        </button>
-        <button
-          onClick={() => setActiveTab("history")}
-          className={`pb-4 px-6 text-sm font-medium transition-all relative ${
-            activeTab === "history"
-              ? "text-primary"
-              : "text-gray-500 hover:text-gray-700"
-          }`}
-        >
-          Historial de Devoluciones
-          {activeTab === "history" && (
-            <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-t-full"></div>
-          )}
-        </button>
+      {/* NAVIGATION AND EXPORT TABS */}
+      <div className="flex flex-col sm:flex-row justify-between items-end border-b border-gray-200 gap-4">
+        <div className="flex w-full sm:w-auto">
+          <button
+            onClick={() => setActiveTab("active")}
+            className={`pb-4 px-6 text-sm font-medium transition-all relative ${
+              activeTab === "active"
+                ? "text-primary"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            Préstamos Activos
+            {activeTab === "active" && (
+              <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-t-full"></div>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab("history")}
+            className={`pb-4 px-6 text-sm font-medium transition-all relative ${
+              activeTab === "history"
+                ? "text-primary"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            Historial de Devoluciones
+            {activeTab === "history" && (
+              <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary rounded-t-full"></div>
+            )}
+          </button>
+        </div>
+
+        {currentList.length > 0 && (
+          <button
+            onClick={handleExport}
+            className="flex items-center gap-2 text-sm text-gray-600 hover:text-primary mb-3 px-2 transition-colors"
+            title="Descargar comprobante en PDF"
+          >
+            <Download className="w-4 h-4" />
+            <span className="font-medium">Descargar Reporte</span>
+          </button>
+        )}
       </div>
 
-      {/* 3. LISTA DE PRÉSTAMOS */}
+      {/* LOANS LIST */}
       {loading ? (
         <div className="flex justify-center py-20">
           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div>
@@ -227,7 +281,7 @@ export default function UserLoans() {
             ))}
           </div>
 
-          {/* 🟢 4. CONTROLES DE PAGINACIÓN */}
+          {/* PAGINATION CONTROLS */}
           {totalPages > 1 && (
             <div className="flex items-center justify-center gap-4 mt-8 pt-4 border-t border-gray-100">
               <button
@@ -253,7 +307,7 @@ export default function UserLoans() {
           )}
         </>
       ) : (
-        // Estado Vacío
+        // Empty State
         <div className="text-center py-16 bg-white rounded-2xl border border-dashed border-gray-200">
           <div className="bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
             <AlertCircle className="w-8 h-8 text-gray-300" />

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "../../api/supabaseClient";
 import { useRealtime } from "../../hooks/useRealtime";
 import { useDebounce } from "../../hooks/useDebounce";
+import { exportToCSV, exportToPDF } from "../../utils/reportGenerator";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Search,
@@ -13,15 +14,18 @@ import {
   BookOpen,
   ChevronLeft,
   ChevronRight,
+  Download,
+  FileText,
+  FileSpreadsheet,
 } from "lucide-react";
 
 export default function UsersPage() {
   const [searchTerm, setSearchTerm] = useState("");
-  // 🟢 2. Create debounced value (500ms)
   const debouncedSearchTerm = useDebounce(searchTerm, 500);
 
   const [imageErrors, setImageErrors] = useState({});
   const [page, setPage] = useState(1);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const ITEMS_PER_PAGE = 8;
 
   const queryClient = useQueryClient();
@@ -33,10 +37,8 @@ export default function UsersPage() {
     isError,
     error,
   } = useQuery({
-    // 🟢 3. Use debouncedSearchTerm in queryKey
     queryKey: ["profiles", page, debouncedSearchTerm],
     queryFn: async () => {
-      // Base query including active loans count
       let query = supabase
         .from("profiles")
         .select(
@@ -51,14 +53,12 @@ export default function UsersPage() {
         )
         .order("created_at", { ascending: false });
 
-      // 🟢 4. Use debouncedSearchTerm for Server-Side Search
       if (debouncedSearchTerm) {
         query = query.or(
           `full_name.ilike.%${debouncedSearchTerm}%,email.ilike.%${debouncedSearchTerm}%`,
         );
       }
 
-      // Server-Side Pagination
       const from = (page - 1) * ITEMS_PER_PAGE;
       const to = from + ITEMS_PER_PAGE - 1;
       query = query.range(from, to);
@@ -67,26 +67,84 @@ export default function UsersPage() {
       if (error) throw error;
       return { data, count };
     },
-    staleTime: 0, // Always fetch fresh data
-    keepPreviousData: true, // Smooth transition between pages
+    staleTime: 0,
+    keepPreviousData: true,
   });
 
   const users = queryResponse?.data || [];
   const totalItems = queryResponse?.count || 0;
   const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE) || 1;
 
-  // Reset page when searching
   useEffect(() => {
     setPage(1);
   }, [debouncedSearchTerm]);
 
-  // 2. REALTIME LISTENERS
-  // Listen for new profiles
+  // EXPORT FUNCTION
+  const handleExport = async (type) => {
+    setShowExportMenu(false);
+
+    const columns = [
+      { header: "ID", accessor: "id" },
+      { header: "Nombre Completo", accessor: "full_name" },
+      { header: "Correo Electrónico", accessor: "email" },
+      { header: "Rol", accessor: "role" },
+      { header: "Préstamos Activos", accessor: "active_loans" },
+      { header: "Fecha Registro", accessor: "created_at" },
+    ];
+
+    try {
+      // Fetch ALL data
+      let query = supabase
+        .from("profiles")
+        .select(
+          `
+          *,
+          loans (status)
+        `,
+        )
+        .order("created_at", { ascending: false });
+
+      if (debouncedSearchTerm) {
+        query = query.or(
+          `full_name.ilike.%${debouncedSearchTerm}%,email.ilike.%${debouncedSearchTerm}%`,
+        );
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      // Process data
+      const processedData = data.map((user) => ({
+        id: user.id,
+        full_name: user.full_name || "Sin Nombre",
+        email: user.email,
+        role: user.role === "admin" ? "Administrador" : "Estudiante",
+        active_loans: user.loans
+          ? user.loans.filter((l) => l.status === "ACTIVO").length
+          : 0,
+        created_at: new Date(user.created_at).toLocaleDateString("es-EC"),
+      }));
+
+      // Generate File
+      if (type === "csv") {
+        exportToCSV(processedData, "Reporte_Usuarios", columns);
+      } else {
+        exportToPDF(
+          processedData,
+          "Directorio de Usuarios Registrados",
+          columns,
+        );
+      }
+    } catch (err) {
+      alert("Error al exportar: " + err.message);
+    }
+  };
+
+  // REALTIME LISTENERS
   useRealtime("profiles", () => {
     queryClient.invalidateQueries({ queryKey: ["profiles"] });
   });
 
-  // Listen for loan changes (to update active loans count instantly)
   useRealtime("loans", () => {
     queryClient.invalidateQueries({ queryKey: ["profiles"] });
   });
@@ -105,7 +163,6 @@ export default function UsersPage() {
     setImageErrors((prev) => ({ ...prev, [userId]: true }));
   };
 
-  // Helper to count active loans
   const getActiveLoansCount = (user) => {
     if (!user.loans) return 0;
     return user.loans.filter((l) => l.status === "ACTIVO").length;
@@ -123,26 +180,58 @@ export default function UsersPage() {
 
   return (
     <div className="space-y-6">
-      {/* 1. HEADER */}
+      {/* HEADER */}
       <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
           <User className="w-5 h-5 text-primary" />
           Directorio de Usuarios
         </h2>
 
-        <div className="relative w-full md:w-80">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Buscar por nombre o correo..."
-            value={searchTerm} // Input remains responsive
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
-          />
+        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto items-center">
+          {/* EXPORT BUTTON */}
+          <div className="relative">
+            <button
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              className="flex items-center gap-2 bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors border border-gray-200"
+            >
+              <Download className="w-4 h-4" />
+              <span className="hidden sm:inline">Exportar</span>
+            </button>
+
+            {showExportMenu && (
+              <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 z-50 overflow-hidden animate-fadeIn">
+                <button
+                  onClick={() => handleExport("csv")}
+                  className="flex items-center gap-3 w-full px-4 py-3 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-green-600" />
+                  Descargar CSV
+                </button>
+                <button
+                  onClick={() => handleExport("pdf")}
+                  className="flex items-center gap-3 w-full px-4 py-3 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-50"
+                >
+                  <FileText className="w-4 h-4 text-red-600" />
+                  Descargar PDF
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="relative w-full md:w-80">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Buscar por nombre o correo..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+            />
+          </div>
         </div>
       </div>
 
-      {/* 2. TABLE */}
+      {/* TABLE */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">

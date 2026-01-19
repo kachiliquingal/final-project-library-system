@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "../../api/supabaseClient";
 import { useRealtime } from "../../hooks/useRealtime";
 import { useDebounce } from "../../hooks/useDebounce";
+import { exportToCSV, exportToPDF } from "../../utils/reportGenerator";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { sendEmailNotification } from "../../api/emailService";
 import {
@@ -17,16 +18,19 @@ import {
   ArrowUp,
   ArrowDown,
   Hash,
+  Download,
+  FileText,
+  FileSpreadsheet,
 } from "lucide-react";
 
 export default function LoansPage() {
   const [searchTerm, setSearchTerm] = useState("");
-  // 🟢 2. Create debounced value (500ms)
   const debouncedSearchTerm = useDebounce(searchTerm, 500);
 
   const [filter, setFilter] = useState("ALL");
   const [page, setPage] = useState(1);
   const [sortOrder, setSortOrder] = useState("desc");
+  const [showExportMenu, setShowExportMenu] = useState(false);
 
   const ITEMS_PER_PAGE = 8;
   const queryClient = useQueryClient();
@@ -35,17 +39,15 @@ export default function LoansPage() {
   const [loanToReturn, setLoanToReturn] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
 
-  // 1. DATA QUERY (Hybrid Server-Side Pagination Strategy)
+  // 1. DATA QUERY
   const {
     data: queryResponse,
     isLoading,
     isError,
     error,
   } = useQuery({
-    // 🟢 3. Use debouncedSearchTerm in queryKey
     queryKey: ["loans", page, filter, sortOrder, debouncedSearchTerm],
     queryFn: async () => {
-      // Base query with count
       let query = supabase.from("loans").select(
         `
           id,
@@ -60,17 +62,12 @@ export default function LoansPage() {
         { count: "exact" },
       );
 
-      // Apply Filter (Status)
       if (filter !== "ALL") {
         query = query.eq("status", filter);
       }
 
-      // Apply Server-Side Sorting
       query = query.order("loan_date", { ascending: sortOrder === "asc" });
 
-      // [Pagination Logic]
-      // If NOT searching (debouncedSearchTerm is empty), use Server-Side Pagination
-      // If searching, fetch all matching status to allow Client-Side filtering (Complex Join Search)
       if (!debouncedSearchTerm) {
         const from = (page - 1) * ITEMS_PER_PAGE;
         const to = from + ITEMS_PER_PAGE - 1;
@@ -83,19 +80,16 @@ export default function LoansPage() {
       return { data, count };
     },
     keepPreviousData: true,
-    staleTime: 0, // Ensure fresh data for admin
+    staleTime: 0,
   });
 
-  // Handle Search & Pagination Logic
   const rawLoans = queryResponse?.data || [];
   const serverCount = queryResponse?.count || 0;
 
   let displayLoans = [];
   let totalItems = 0;
 
-  // 🟢 4. Use debouncedSearchTerm for filtering
   if (debouncedSearchTerm) {
-    // Client-Side Search (Fallback for complex joins)
     const searchLower = debouncedSearchTerm.toLowerCase();
     const filtered = rawLoans.filter((loan) => {
       const bookTitle = loan.books?.title?.toLowerCase() || "";
@@ -109,20 +103,17 @@ export default function LoansPage() {
     });
 
     totalItems = filtered.length;
-    // Manual slice for search results
     displayLoans = filtered.slice(
       (page - 1) * ITEMS_PER_PAGE,
       page * ITEMS_PER_PAGE,
     );
   } else {
-    // Server-Side Data (Direct mapping)
     displayLoans = rawLoans;
     totalItems = serverCount;
   }
 
   const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE) || 1;
 
-  // Reset page on filter/search change
   useEffect(() => {
     setPage(1);
   }, [filter, debouncedSearchTerm, sortOrder]);
@@ -131,10 +122,84 @@ export default function LoansPage() {
     setSortOrder((prev) => (prev === "desc" ? "asc" : "desc"));
   };
 
-  // 2. MUTATION: RETURN BOOK
+  // EXPORT FUNCTION
+  const handleExport = async (type) => {
+    setShowExportMenu(false);
+
+    // Define report columns
+    const columns = [
+      { header: "ID", accessor: "id" },
+      { header: "Libro", accessor: "book_title" },
+      { header: "Estudiante", accessor: "student_name" },
+      { header: "Correo", accessor: "student_email" },
+      { header: "Fecha Préstamo", accessor: "loan_date" },
+      { header: "Fecha Devolución", accessor: "return_date" },
+      { header: "Estado", accessor: "status" },
+    ];
+
+    try {
+      // 1. Fetch ALL data
+      let query = supabase.from("loans").select(`
+          id,
+          loan_date,
+          return_date,
+          status,
+          books ( title ),
+          profiles ( full_name, email )
+      `);
+
+      if (filter !== "ALL") {
+        query = query.eq("status", filter);
+      }
+
+      // Order same as current view
+      query = query.order("loan_date", { ascending: sortOrder === "asc" });
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      // 2. Process and flatten data for the table
+      let processedData = data.map((loan) => ({
+        id: loan.id,
+        book_title: loan.books?.title || "Desconocido",
+        student_name: loan.profiles?.full_name || "Desconocido",
+        student_email: loan.profiles?.email || "-",
+        loan_date: new Date(loan.loan_date).toLocaleDateString("es-EC"),
+        return_date: loan.return_date
+          ? new Date(loan.return_date).toLocaleDateString("es-EC")
+          : "Pendiente",
+        status: loan.status,
+      }));
+
+      // 3. Client-Side Search Logic
+      if (debouncedSearchTerm) {
+        const searchLower = debouncedSearchTerm.toLowerCase();
+        processedData = processedData.filter(
+          (item) =>
+            item.book_title.toLowerCase().includes(searchLower) ||
+            item.student_name.toLowerCase().includes(searchLower) ||
+            item.id.toString().includes(searchLower),
+        );
+      }
+
+      // 4. Generate File
+      if (type === "csv") {
+        exportToCSV(processedData, "Reporte_Prestamos", columns);
+      } else {
+        exportToPDF(
+          processedData,
+          "Reporte Historial de Préstamos",
+          columns,
+          "landscape",
+        );
+      }
+    } catch (err) {
+      alert("Error al exportar: " + err.message);
+    }
+  };
+
   const returnMutation = useMutation({
     mutationFn: async (loan) => {
-      // Update Loan Status
       const { error: loanError } = await supabase
         .from("loans")
         .update({
@@ -145,7 +210,6 @@ export default function LoansPage() {
 
       if (loanError) throw loanError;
 
-      // Update Book Status
       const { error: bookError } = await supabase
         .from("books")
         .update({ status: "DISPONIBLE" })
@@ -157,7 +221,6 @@ export default function LoansPage() {
       const studentName = loan.profiles?.full_name || "Estudiante";
       const bookTitle = loan.books?.title || "Libro";
 
-      // DB Notification (Traceability)
       await supabase.from("notifications").insert([
         {
           type: "RETURN",
@@ -166,7 +229,6 @@ export default function LoansPage() {
         },
       ]);
 
-      // Email Student (Traceability)
       await sendEmailNotification({
         name: studentName,
         subject: `Constancia de Devolución #${loan.id} - Biblioteca UCE`,
@@ -179,7 +241,6 @@ export default function LoansPage() {
         target: "student",
       });
 
-      // Email Admin (Traceability)
       await sendEmailNotification({
         name: "Administrador",
         subject: `✅ Devolución #${loan.id} Procesada (Sistema)`,
@@ -189,7 +250,6 @@ export default function LoansPage() {
         target: "admin",
       });
 
-      // Refresh Data
       queryClient.invalidateQueries({ queryKey: ["loans"] });
       queryClient.invalidateQueries({ queryKey: ["books"] });
       queryClient.invalidateQueries({ queryKey: ["catalog"] });
@@ -204,12 +264,10 @@ export default function LoansPage() {
     },
   });
 
-  // Realtime Listener
   useRealtime("loans", () => {
     queryClient.invalidateQueries({ queryKey: ["loans"] });
   });
 
-  // --- HANDLERS ---
   const handleReturnClick = (loan) => {
     setLoanToReturn(loan);
   };
@@ -220,7 +278,6 @@ export default function LoansPage() {
     }
   };
 
-  // --- FORMATTER ---
   const formatDate = (dateString) => {
     if (!dateString) return "-";
     return new Date(dateString).toLocaleDateString("es-EC", {
@@ -253,7 +310,7 @@ export default function LoansPage() {
           Historial de Préstamos
         </h2>
 
-        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto items-center">
           <select
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
@@ -263,6 +320,36 @@ export default function LoansPage() {
             <option value="ACTIVO">Activos (Pendientes)</option>
             <option value="DEVUELTO">Devueltos</option>
           </select>
+
+          {/* EXPORT BUTTON */}
+          <div className="relative">
+            <button
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              className="flex items-center gap-2 bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors border border-gray-200"
+            >
+              <Download className="w-4 h-4" />
+              <span className="hidden sm:inline">Exportar</span>
+            </button>
+
+            {showExportMenu && (
+              <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 z-50 overflow-hidden animate-fadeIn">
+                <button
+                  onClick={() => handleExport("csv")}
+                  className="flex items-center gap-3 w-full px-4 py-3 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-green-600" />
+                  Descargar CSV
+                </button>
+                <button
+                  onClick={() => handleExport("pdf")}
+                  className="flex items-center gap-3 w-full px-4 py-3 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-50"
+                >
+                  <FileText className="w-4 h-4 text-red-600" />
+                  Descargar PDF
+                </button>
+              </div>
+            )}
+          </div>
 
           <div className="relative w-full sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -283,7 +370,6 @@ export default function LoansPage() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100 text-xs uppercase text-gray-500 font-semibold tracking-wider">
-                {/* ID Column */}
                 <th className="px-6 py-4 w-16 text-center">
                   <div className="flex items-center justify-center gap-1">
                     <Hash className="w-3 h-3" /> ID
@@ -329,7 +415,6 @@ export default function LoansPage() {
                     key={loan.id}
                     className="hover:bg-gray-50 transition-colors"
                   >
-                    {/* ID Display */}
                     <td className="px-6 py-4 text-xs font-mono font-bold text-gray-400 text-center">
                       #{loan.id}
                     </td>
@@ -448,7 +533,7 @@ export default function LoansPage() {
         )}
       </div>
 
-      {/* --- CONFIRMATION MODAL --- */}
+      {/* --- CONFIRMATION MODAL (Unchanged) --- */}
       {loanToReturn && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 text-center">
@@ -490,7 +575,7 @@ export default function LoansPage() {
         </div>
       )}
 
-      {/* --- SUCCESS MODAL --- */}
+      {/* --- SUCCESS MODAL (Unchanged) --- */}
       {successMessage && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 text-center">

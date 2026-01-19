@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "../../api/supabaseClient";
 import { useRealtime } from "../../hooks/useRealtime";
 import { useDebounce } from "../../hooks/useDebounce";
+import { exportToCSV, exportToPDF } from "../../utils/reportGenerator";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
   Search,
@@ -16,20 +17,22 @@ import {
   CheckCircle,
   ChevronLeft,
   ChevronRight,
+  Download,
+  FileText,
+  FileSpreadsheet,
 } from "lucide-react";
 
 export default function InventoryPage() {
   const [searchTerm, setSearchTerm] = useState("");
-  // Debounced (500ms)
   const debouncedSearchTerm = useDebounce(searchTerm, 500);
 
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [page, setPage] = useState(1);
+  const [showExportMenu, setShowExportMenu] = useState(false);
 
   const ITEMS_PER_PAGE = 8;
   const queryClient = useQueryClient();
 
-  // ... (Estados de modales y formulario se mantienen igual)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [editingBook, setEditingBook] = useState(null);
   const [deletingBook, setDeletingBook] = useState(null);
@@ -48,7 +51,6 @@ export default function InventoryPage() {
     isError,
     error,
   } = useQuery({
-    // 🟢 3. Usar debouncedSearchTerm en la clave
     queryKey: ["books", page, filterStatus, debouncedSearchTerm],
     queryFn: async () => {
       let query = supabase
@@ -64,8 +66,6 @@ export default function InventoryPage() {
       query = query.order("id", { ascending: true });
 
       // [Pagination Logic]
-      // Si NO estamos buscando (debouncedSearchTerm vacío), usamos paginación del servidor.
-      // Si SÍ estamos buscando, traemos todo lo que coincida para filtrar (lógica híbrida actual).
       if (!debouncedSearchTerm) {
         const from = (page - 1) * ITEMS_PER_PAGE;
         const to = from + ITEMS_PER_PAGE - 1;
@@ -87,9 +87,9 @@ export default function InventoryPage() {
   let displayBooks = [];
   let totalCount = 0;
 
-  // 🟢 4. Usar debouncedSearchTerm para el filtrado
+  // Use debouncedSearchTerm for filtering
   if (debouncedSearchTerm) {
-    // Client-Side Search (Fallback for complex OR search if not server-side)
+    // Client-Side Search
     const searchLower = debouncedSearchTerm.toLowerCase();
     const filtered = rawBooks.filter((book) => {
       return (
@@ -104,7 +104,7 @@ export default function InventoryPage() {
       page * ITEMS_PER_PAGE,
     );
   } else {
-    // Server-Side Data (Direct mapping)
+    // Server-Side Data
     displayBooks = rawBooks;
     totalCount = serverCount;
   }
@@ -116,12 +116,60 @@ export default function InventoryPage() {
     setPage(1);
   }, [filterStatus, debouncedSearchTerm]);
 
+  // EXPORT FUNCTION
+  const handleExport = async (type) => {
+    setShowExportMenu(false);
+
+    // Define columns for the report
+    const columns = [
+      { header: "ID", accessor: "id" },
+      { header: "Título", accessor: "title" },
+      { header: "Autor", accessor: "author" },
+      { header: "Categoría", accessor: "category" },
+      { header: "Estado", accessor: "status" },
+      { header: "Fecha Registro", accessor: "created_at" },
+    ];
+
+    try {
+      // Fetch ALL matching data for the report (ignoring pagination)
+      let query = supabase.from("books").select("*").eq("is_active", true);
+
+      if (filterStatus !== "ALL") {
+        query = query.eq("status", filterStatus);
+      }
+
+      if (debouncedSearchTerm) {
+        query = query.or(
+          `title.ilike.%${debouncedSearchTerm}%,author.ilike.%${debouncedSearchTerm}%`,
+        );
+      }
+
+      const { data, error } = await query.order("id", { ascending: true });
+
+      if (error) throw error;
+
+      const formattedData = data.map((item) => ({
+        ...item,
+        created_at: new Date(item.created_at).toLocaleDateString("es-EC"),
+      }));
+
+      // Generate File
+      if (type === "csv") {
+        exportToCSV(formattedData, "Reporte_Inventario", columns);
+      } else {
+        exportToPDF(formattedData, "Reporte de Inventario de Libros", columns);
+      }
+    } catch (err) {
+      alert("Error generando el reporte: " + err.message);
+    }
+  };
+
   const showSuccess = (msg) => {
     closeModals();
     setSuccessMessage(msg);
   };
 
-  // 2. MUTATION: CREATE
+  // ... (Mutations: Create, Update, Delete remain EXACTLY the same)
   const createMutation = useMutation({
     mutationFn: async (newBook) => {
       const { error } = await supabase
@@ -136,7 +184,6 @@ export default function InventoryPage() {
     onError: (err) => alert("Error al crear: " + err.message),
   });
 
-  // 3. MUTATION: UPDATE
   const updateMutation = useMutation({
     mutationFn: async (bookData) => {
       const { error } = await supabase
@@ -157,7 +204,6 @@ export default function InventoryPage() {
     onError: (err) => alert("Error al actualizar: " + err.message),
   });
 
-  // 4. MUTATION: DELETE (SOFT DELETE)
   const deleteMutation = useMutation({
     mutationFn: async (bookId) => {
       const { error } = await supabase
@@ -178,7 +224,7 @@ export default function InventoryPage() {
     queryClient.invalidateQueries({ queryKey: ["books"] });
   });
 
-  // --- HANDLERS ---
+  // ... (Handlers remain the same)
   const handleSearch = (e) => {
     setSearchTerm(e.target.value);
   };
@@ -257,7 +303,7 @@ export default function InventoryPage() {
           />
         </div>
 
-        <div className="flex gap-3 w-full md:w-auto">
+        <div className="flex gap-3 w-full md:w-auto items-center">
           <select
             value={filterStatus}
             onChange={(e) => {
@@ -271,6 +317,36 @@ export default function InventoryPage() {
             <option value="PRESTADO">Prestados</option>
           </select>
 
+          {/* EXPORT BUTTON & DROPDOWN */}
+          <div className="relative">
+            <button
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              className="flex items-center gap-2 bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors border border-gray-200"
+            >
+              <Download className="w-4 h-4" />
+              <span className="hidden sm:inline">Exportar</span>
+            </button>
+
+            {showExportMenu && (
+              <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 z-50 overflow-hidden animate-fadeIn">
+                <button
+                  onClick={() => handleExport("csv")}
+                  className="flex items-center gap-3 w-full px-4 py-3 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-green-600" />
+                  Descargar CSV
+                </button>
+                <button
+                  onClick={() => handleExport("pdf")}
+                  className="flex items-center gap-3 w-full px-4 py-3 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors border-t border-gray-50"
+                >
+                  <FileText className="w-4 h-4 text-red-600" />
+                  Descargar PDF
+                </button>
+              </div>
+            )}
+          </div>
+
           <button
             onClick={openCreateModal}
             className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-800 transition-colors shadow-lg shadow-blue-900/20"
@@ -281,7 +357,7 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {/* 2. TABLE */}
+      {/* TABLE */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
@@ -409,7 +485,7 @@ export default function InventoryPage() {
         )}
       </div>
 
-      {/* --- MODALS --- */}
+      {/* MODALS */}
 
       {/* 1. FORM MODAL */}
       {isFormOpen && (
