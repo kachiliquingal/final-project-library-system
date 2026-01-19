@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -5,24 +6,35 @@ import {
   Navigate,
 } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
+import { useAuthStore } from "./store/authStore";
 import LoginPage from "./pages/LoginPage";
 
-// Importamos el componente de seguridad
 import ProtectedRoute from "./components/ProtectedRoute";
 
-// Layouts y Páginas de Admin
 import AdminLayout from "./components/admin/AdminLayout";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import InventoryPage from "./pages/admin/InventoryPage";
 import UsersPage from "./pages/admin/UsersPage";
 import LoansPage from "./pages/admin/LoansPage";
 
-// Layouts y Páginas de Usuario (NUEVO)
 import UserLayout from "./components/user/UserLayout";
 import UserCatalog from "./pages/user/UserCatalog";
-import UserLoans from "./pages/user/UserLoans"; // <--- IMPORTAR
+import UserLoans from "./pages/user/UserLoans";
 
 function App() {
+  // Extract the Store initializer
+  const initializeAuthListener = useAuthStore(
+    (state) => state.initializeAuthListener,
+  );
+
+  // Run the initializer only once when the App loads
+  useEffect(() => {
+    const unsubscribe = initializeAuthListener();
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [initializeAuthListener]);
+
   return (
     <Router>
       <AuthProvider>

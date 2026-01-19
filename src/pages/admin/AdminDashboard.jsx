@@ -4,6 +4,7 @@ import { useRealtime } from "../../hooks/useRealtime";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCategoryCoverImage } from "../../utils/bookCoverHelper";
 import { exportToCSV, exportDashboardPDF } from "../../utils/reportGenerator";
+import { useAuthStore } from "../../store/authStore";
 import {
   BarChart,
   Bar,
@@ -28,6 +29,9 @@ import {
 export default function AdminDashboard() {
   const queryClient = useQueryClient();
   const [showExportMenu, setShowExportMenu] = useState(false);
+
+  // We obtain the user directly from Zustand
+  const { user } = useAuthStore();
 
   // STATE FOR TIME FILTER
   const [timeRange, setTimeRange] = useState("all");
@@ -58,20 +62,16 @@ export default function AdminDashboard() {
       }
 
       // 2. PREPARE QUERIES
-      // A. Loans made in this period (for charts and outgoing count)
       let borrowedQuery = supabase
         .from("loans")
         .select("loan_date, status, book_id, books(title, author, category)")
         .order("loan_date", { ascending: false });
 
-      // B. Returns made in this period (Incoming count)
-      // We use count: 'exact', head: true to only count.
       let returnedQuery = supabase
         .from("loans")
         .select("*", { count: "exact", head: true })
         .not("return_date", "is", null);
 
-      // Apply date filter to both queries
       if (startDate) {
         borrowedQuery = borrowedQuery.gte("loan_date", startDate);
         returnedQuery = returnedQuery.gte("return_date", startDate);
@@ -222,7 +222,6 @@ export default function AdminDashboard() {
       }));
       exportToCSV(dataToExport, `Data_${timeRange}`, columns);
     } else {
-      // Pass periodStats to the PDF
       exportDashboardPDF(
         dashboard.stats,
         dashboard.topBooks,
@@ -299,7 +298,15 @@ export default function AdminDashboard() {
       {/* HEADER */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">Panel de Control</h2>
+          <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+            Panel de Control
+            {/* Visual Indicator of Status */}
+            {user && (
+              <span className="text-sm font-normal text-gray-500 bg-gray-100 px-2 py-1 rounded-md border border-gray-200">
+                Hola, {user.email} (Zustand)
+              </span>
+            )}
+          </h2>
           <p className="text-sm text-gray-500 mt-1">
             {getReportTitle(timeRange)}
           </p>
@@ -358,7 +365,6 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* STATS CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {statCards.map((stat, index) => (
           <div
@@ -380,7 +386,6 @@ export default function AdminDashboard() {
         ))}
       </div>
 
-      {/* CHARTS AND TOP 5 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
           <h3 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
@@ -464,7 +469,6 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* LEADERS BY CATEGORY */}
       <div>
         <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
           <Trophy className="w-6 h-6 text-yellow-500" />
