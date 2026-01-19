@@ -1,18 +1,17 @@
 import emailjs from "@emailjs/browser";
 
-// LEEMOS LAS CLAVES DESDE EL ARCHIVO .ENV.LOCAL
 const SERVICE_ID = import.meta.env.VITE_EMAILJS_SERVICE_ID;
 const PUBLIC_KEY = import.meta.env.VITE_EMAILJS_PUBLIC_KEY;
 const TEMPLATE_STUDENT = import.meta.env.VITE_EMAILJS_TEMPLATE_STUDENT;
 const TEMPLATE_ADMIN = import.meta.env.VITE_EMAILJS_TEMPLATE_ADMIN;
 
 /**
- * Envía notificaciones por correo usando plantillas fijas.
+ * Sends email notifications using fixed templates.
  * @param {Object} params
- * @param {string} params.name - Nombre de la persona
- * @param {string} params.subject - Asunto
- * @param {string} params.message - Mensaje
- * @param {'student' | 'admin'} params.target - Define qué plantilla usar
+ * @param {string} params.name
+ * @param {string} params.subject
+ * @param {string} params.message
+ * @param {'student' | 'admin'} params.target
  */
 export const sendEmailNotification = async ({
   name,
@@ -21,7 +20,7 @@ export const sendEmailNotification = async ({
   target = "student",
 }) => {
   try {
-    // 1. Seleccionamos la plantilla correcta según el objetivo
+    // Select the correct template based on the target
     const selectedTemplate =
       target === "admin" ? TEMPLATE_ADMIN : TEMPLATE_STUDENT;
 
@@ -41,7 +40,7 @@ export const sendEmailNotification = async ({
       }),
     };
 
-    // 2. Enviamos el correo (El destinatario ya está fijo en la plantilla de la web)
+    //  Send the email
     await emailjs.send(
       SERVICE_ID,
       selectedTemplate,

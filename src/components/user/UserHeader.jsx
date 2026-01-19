@@ -22,7 +22,7 @@ export default function UserHeader() {
 
   const isActive = (path) => location.pathname === path;
 
-  // 1. Cargar notificaciones
+  // Load notifications
   const { data: notifications = [] } = useQuery({
     queryKey: ["user-notifications", user?.id],
     queryFn: async () => {
@@ -40,9 +40,8 @@ export default function UserHeader() {
     staleTime: 0,
   });
 
-  // 2. Realtime
+  // Realtime
   useRealtime("notifications", (payload) => {
-    // Si la nueva notificación es para mí, recargo
     if (payload.new?.user_id === user?.id) {
       queryClient.invalidateQueries({
         queryKey: ["user-notifications", user?.id],
@@ -50,7 +49,7 @@ export default function UserHeader() {
     }
   });
 
-  // 3. Marcar como leídas
+  // Mark as read
   const markAsRead = async () => {
     if (unreadCount > 0) {
       await supabase
@@ -151,7 +150,7 @@ export default function UserHeader() {
           </Link>
         </div>
 
-        {/* 🔔 CAMPANA */}
+        {/* BELL */}
         <div className="relative" ref={notifRef}>
           <button
             onClick={toggleNotif}

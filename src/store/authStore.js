@@ -25,7 +25,7 @@ export const useAuthStore = create(
 
       // BUSINESS LOGIC
 
-      // --- Fetch Profile ---
+      // Fetch Profile
       fetchProfile: async (sessionUser) => {
         if (!sessionUser) return null;
 
@@ -63,7 +63,6 @@ export const useAuthStore = create(
       },
 
       // Auth Methods
-
       loginWithPassword: async (email, password) => {
         const { data, error } = await supabase.auth.signInWithPassword({
           email,

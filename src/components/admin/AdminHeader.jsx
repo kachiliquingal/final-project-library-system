@@ -11,11 +11,11 @@ export default function AdminHeader({ title }) {
   const dropdownRef = useRef(null);
   const queryClient = useQueryClient();
 
-  // 1. Cargar notificaciones
+  // Load notifications
   const { data: notifications = [] } = useQuery({
     queryKey: ["admin-notifications", user?.id],
     queryFn: async () => {
-      // Filtro inteligente: Préstamos/Devoluciones de todos, Logins solo míos
+      // Smart filter
       const filterCondition = `type.in.(LOAN,RETURN),and(type.eq.LOGIN,user_id.eq.${user.id})`;
 
       const { data, error } = await supabase
@@ -37,7 +37,7 @@ export default function AdminHeader({ title }) {
     queryClient.invalidateQueries({ queryKey: ["admin-notifications"] });
   });
 
-  // 3. Marcar como leídas
+  // 3. Mark as read
   const markAsRead = async () => {
     const unreadIds = notifications.filter((n) => !n.is_read).map((n) => n.id);
     if (unreadIds.length > 0) {
@@ -66,7 +66,7 @@ export default function AdminHeader({ title }) {
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
 
-  // 🟢 FORMATO MEJORADO: FECHA + HORA (Ej: 17 ene, 05:18 p. m.)
+  // DATE + TIME
   const formatDateTime = (dateString) => {
     return new Date(dateString).toLocaleString("es-EC", {
       day: "numeric",
@@ -81,7 +81,7 @@ export default function AdminHeader({ title }) {
       <h1 className="text-2xl font-bold text-gray-800">{title}</h1>
 
       <div className="flex items-center gap-6">
-        {/* Notificaciones */}
+        {/* NOTIFICATIONS */}
         <div className="flex items-center gap-4" ref={dropdownRef}>
           <button
             onClick={handleToggle}

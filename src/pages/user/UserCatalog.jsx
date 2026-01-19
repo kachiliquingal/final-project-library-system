@@ -3,7 +3,7 @@ import { supabase } from "../../api/supabaseClient";
 import { useAuth } from "../../context/AuthContext";
 import { useRealtime } from "../../hooks/useRealtime";
 import { useDebounce } from "../../hooks/useDebounce";
-import { getCategoryCoverImage } from "../../utils/bookCoverHelper"
+import { getCategoryCoverImage } from "../../utils/bookCoverHelper";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { sendEmailNotification } from "../../api/emailService";
 import {
@@ -28,11 +28,10 @@ export default function UserCatalog() {
   const [page, setPage] = useState(1);
   const ITEMS_PER_PAGE = 8;
 
-  // MODALES
   const [bookToRequest, setBookToRequest] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
 
-  // 1. QUERY: Catálogo
+  // QUERY: Catalog
   const {
     data: queryData,
     isLoading,
@@ -63,7 +62,7 @@ export default function UserCatalog() {
     staleTime: 1000 * 60,
   });
 
-  // 2. QUERY: Top 5 Global
+  // QUERY: Top 5 Global
   const { data: topBooks = [] } = useQuery({
     queryKey: ["top-books"],
     queryFn: async () => {
@@ -81,7 +80,7 @@ export default function UserCatalog() {
   const totalBooks = queryData?.count || 0;
   const totalPages = Math.ceil(totalBooks / ITEMS_PER_PAGE) || 1;
 
-  // 3. MUTATION: Solicitar Préstamo
+  // MUTATION: Request Loan
   const loanMutation = useMutation({
     mutationFn: async (book) => {
       const { data: updatedBook, error: updateError } = await supabase
@@ -169,7 +168,7 @@ export default function UserCatalog() {
     },
   });
 
-  // 4. REALTIME
+  // REALTIME
   useRealtime("books", () => {
     queryClient.invalidateQueries({ queryKey: ["catalog"] });
     queryClient.invalidateQueries({ queryKey: ["top-books"] });
@@ -203,7 +202,7 @@ export default function UserCatalog() {
 
   return (
     <div className="space-y-8 pb-10">
-      {/* 1. HERO SECTION */}
+      {/* 1. HEADER SECTION */}
       <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 text-center space-y-6 relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500"></div>
 
@@ -229,7 +228,7 @@ export default function UserCatalog() {
       </div>
 
       <div className="space-y-12">
-        {/* 2. SECCIÓN TOP 5 */}
+        {/* TOP 5 SECTION */}
         {!debouncedSearchTerm && topBooks.length > 0 && (
           <section>
             <div className="flex items-center gap-2 mb-6">
@@ -252,7 +251,6 @@ export default function UserCatalog() {
                     Top {idx + 1}
                   </div>
 
-                  {/* PORTADA REAL */}
                   <div className="h-48 w-full relative overflow-hidden bg-gray-100">
                     <img
                       src={
@@ -297,7 +295,7 @@ export default function UserCatalog() {
           </section>
         )}
 
-        {/* 3. CATÁLOGO PRINCIPAL */}
+        {/* MAIN CATALOGUE */}
         <section>
           <div className="flex flex-col sm:flex-row justify-between items-end mb-6 gap-4">
             <div>
@@ -348,7 +346,7 @@ export default function UserCatalog() {
                   key={book.id}
                   className="bg-white rounded-2xl border border-gray-100 overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col group h-full"
                 >
-                  {/* 🟢 PORTADA REAL (Imagen) */}
+                  {/* BOOK COVER */}
                   <div className="h-56 relative bg-gray-100 overflow-hidden">
                     <img
                       src={
@@ -359,7 +357,7 @@ export default function UserCatalog() {
                       loading="lazy"
                     />
 
-                    {/* Badge de Estado Superpuesto */}
+                    {/* STATUS BADGE OVERLAY */}
                     <div className="absolute top-3 right-3 z-10">
                       {book.status === "DISPONIBLE" ? (
                         <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold bg-white/90 backdrop-blur text-emerald-700 shadow-sm uppercase tracking-wide">
@@ -395,7 +393,7 @@ export default function UserCatalog() {
                       </span>
                     </div>
 
-                    {/* BOTÓN DE ACCIÓN */}
+                    {/* ACTION BUTTON */}
                     <div className="mt-auto pt-4 border-t border-gray-50">
                       <button
                         onClick={() => handleRequestClick(book)}
@@ -463,7 +461,7 @@ export default function UserCatalog() {
         </section>
       </div>
 
-      {/* --- MODALES --- */}
+      {/* MODALS */}
       {bookToRequest && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden p-8 text-center transform transition-all scale-100">

@@ -25,7 +25,7 @@ export default function UserLoans() {
 
   const queryClient = useQueryClient();
 
-  // 1. USEQUERY
+  // USEQUERY
   const {
     data: loans = [],
     isLoading: loading,
@@ -58,7 +58,7 @@ export default function UserLoans() {
     staleTime: 0,
   });
 
-  // 2. REALTIME
+  // REALTIME
   useRealtime("loans", (payload) => {
     const changedUserId = payload.new?.user_id || payload.old?.user_id;
     if (changedUserId === user?.id) {
@@ -66,7 +66,7 @@ export default function UserLoans() {
     }
   });
 
-  // 3. RESET PAGINATION ON TAB CHANGE
+  // RESET PAGINATION ON TAB CHANGE
   useEffect(() => {
     setPage(1);
   }, [activeTab]);
@@ -117,7 +117,6 @@ export default function UserLoans() {
       { header: "Estado", accessor: "status_text" },
     ];
 
-    // If it's history, add return date
     if (activeTab === "history") {
       columns.splice(3, 0, {
         header: "Fecha Devolución",

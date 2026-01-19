@@ -35,7 +35,7 @@ export default function LoansPage() {
   const ITEMS_PER_PAGE = 8;
   const queryClient = useQueryClient();
 
-  // --- MODAL STATES ---
+  // MODAL STATES
   const [loanToReturn, setLoanToReturn] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
 
@@ -152,7 +152,6 @@ export default function LoansPage() {
         query = query.eq("status", filter);
       }
 
-      // Order same as current view
       query = query.order("loan_date", { ascending: sortOrder === "asc" });
 
       const { data, error } = await query;
@@ -533,7 +532,7 @@ export default function LoansPage() {
         )}
       </div>
 
-      {/* --- CONFIRMATION MODAL (Unchanged) --- */}
+      {/* CONFIRMATION MODAL */}
       {loanToReturn && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 text-center">
@@ -575,7 +574,7 @@ export default function LoansPage() {
         </div>
       )}
 
-      {/* --- SUCCESS MODAL (Unchanged) --- */}
+      {/* SUCCESS MODAL */}
       {successMessage && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 text-center">

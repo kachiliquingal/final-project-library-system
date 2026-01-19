@@ -43,7 +43,7 @@ function App() {
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<LoginPage />} />
 
-          {/* 🔴 ADMIN ZONE (Only 'admin' role) */}
+          {/* ADMIN ZONE */}
           <Route element={<ProtectedRoute allowedRoles={["admin"]} />}>
             <Route path="/admin" element={<AdminLayout />}>
               <Route
@@ -57,7 +57,7 @@ function App() {
             </Route>
           </Route>
 
-          {/* 🟢 USER/STUDENT ZONE (Only 'user' role) */}
+          {/* USER/STUDENT ZONE */}
           <Route element={<ProtectedRoute allowedRoles={["user"]} />}>
             <Route path="/user" element={<UserLayout />}>
               <Route index element={<Navigate to="/user/catalog" replace />} />

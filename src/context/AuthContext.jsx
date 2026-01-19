@@ -18,11 +18,8 @@ export const useAuth = () => {
 
 // PROVIDER WITH LOADING SCREEN
 export const AuthProvider = ({ children }) => {
-  // We read the loading state directly from the store
   const loading = useAuthStore((state) => state.loading);
 
-  // If loading, we show the spinner instead of the app
-  // This prevents protected routes from redirecting prematurely
   if (loading) {
     return (
       <div className="h-screen flex flex-col items-center justify-center bg-gray-50">

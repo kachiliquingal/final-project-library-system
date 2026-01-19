@@ -24,7 +24,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
 
-  // 1. EFECTO DE REDIRECCIÓN (Si ya estás logueado legalmente)
+  // REDIRECT EFFECT
   useEffect(() => {
     if (isAuthenticated && user) {
       if (user.role === "admin") navigate("/admin/dashboard");
@@ -32,16 +32,16 @@ export default function LoginPage() {
     }
   }, [isAuthenticated, user, navigate]);
 
-  // 2. NUEVO: AUTO-LIMPIEZA DE TOKENS ZOMBIES (El Blindaje)
+  // SELF-CLEANSING OF ZOMBIE TOKENS
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
       const hasZombieToken = Object.keys(localStorage).some((key) =>
-        key.startsWith("sb-")
+        key.startsWith("sb-"),
       );
 
       if (hasZombieToken) {
         console.warn(
-          "🛡️ Sistema: Detectada sesión corrupta antigua. Ejecutando auto-limpieza..."
+          "🛡️ Sistema: Detectada sesión corrupta antigua. Ejecutando auto-limpieza...",
         );
         localStorage.clear();
       }
@@ -56,10 +56,10 @@ export default function LoginPage() {
 
     try {
       if (isLogin) {
-        // --- LOGIN ---
+        // LOGIN
         const { user: loggedUser, error: loginError } = await loginWithPassword(
           email,
-          password
+          password,
         );
         if (loginError) throw loginError;
 
@@ -67,16 +67,16 @@ export default function LoginPage() {
           navigate("/admin/dashboard");
         }
       } else {
-        // --- REGISTRO ---
+        // REGISTER
         if (!fullName) throw new Error("El nombre es requerido");
 
-        // Doble seguridad: Asegurar limpieza antes de registrar
+        // Double security: Ensure cleanup before registering
         if (!isAuthenticated) localStorage.clear();
 
         const { user, error: registerError } = await registerWithPassword(
           email,
           password,
-          fullName
+          fullName,
         );
 
         if (registerError) throw registerError;
@@ -113,10 +113,9 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4 font-sans">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
-        {/* Header Azul */}
+        {/* HEADER */}
         <div className="bg-primary p-6 text-center">
           <div className="bg-white/10 p-3 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-3 backdrop-blur-sm">
-            {/* Usamos el icono Book nativo de lucide-react */}
             <Book className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-xl font-bold text-white tracking-wide">
@@ -127,7 +126,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Tabs */}
+        {/* TABS */}
         <div className="flex border-b border-gray-200">
           <button
             onClick={() => {
@@ -159,7 +158,7 @@ export default function LoginPage() {
           </button>
         </div>
 
-        {/* Form Body */}
+        {/* FORM BODY */}
         <div className="p-8">
           {error && (
             <div className="mb-4 p-3 bg-red-50 text-red-600 text-xs rounded border border-red-100 text-center animate-pulse">

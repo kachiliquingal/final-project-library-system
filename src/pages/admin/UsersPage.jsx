@@ -30,7 +30,7 @@ export default function UsersPage() {
 
   const queryClient = useQueryClient();
 
-  // 1. QUERY: Server-Side Pagination & Search (with Debounce)
+  // QUERY
   const {
     data: queryResponse,
     isLoading,
@@ -149,7 +149,7 @@ export default function UsersPage() {
     queryClient.invalidateQueries({ queryKey: ["profiles"] });
   });
 
-  // --- HELPERS ---
+  // HELPERS
   const formatDate = (dateString) => {
     if (!dateString) return "N/A";
     return new Date(dateString).toLocaleDateString("es-EC", {

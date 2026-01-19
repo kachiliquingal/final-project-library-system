@@ -44,7 +44,7 @@ export default function InventoryPage() {
     category: "",
   });
 
-  // 1. DATA QUERY (Hybrid Pagination + Debounced Search)
+  // DATA QUERY
   const {
     data: queryResponse,
     isLoading,
@@ -62,10 +62,8 @@ export default function InventoryPage() {
         query = query.eq("status", filterStatus);
       }
 
-      // Default Ordering
       query = query.order("id", { ascending: true });
 
-      // [Pagination Logic]
       if (!debouncedSearchTerm) {
         const from = (page - 1) * ITEMS_PER_PAGE;
         const to = from + ITEMS_PER_PAGE - 1;
@@ -87,7 +85,6 @@ export default function InventoryPage() {
   let displayBooks = [];
   let totalCount = 0;
 
-  // Use debouncedSearchTerm for filtering
   if (debouncedSearchTerm) {
     // Client-Side Search
     const searchLower = debouncedSearchTerm.toLowerCase();
@@ -104,7 +101,6 @@ export default function InventoryPage() {
       page * ITEMS_PER_PAGE,
     );
   } else {
-    // Server-Side Data
     displayBooks = rawBooks;
     totalCount = serverCount;
   }
@@ -169,7 +165,7 @@ export default function InventoryPage() {
     setSuccessMessage(msg);
   };
 
-  // ... (Mutations: Create, Update, Delete remain EXACTLY the same)
+  // MUTATIONS
   const createMutation = useMutation({
     mutationFn: async (newBook) => {
       const { error } = await supabase
@@ -224,7 +220,7 @@ export default function InventoryPage() {
     queryClient.invalidateQueries({ queryKey: ["books"] });
   });
 
-  // ... (Handlers remain the same)
+  // HANDLERS
   const handleSearch = (e) => {
     setSearchTerm(e.target.value);
   };
@@ -290,7 +286,7 @@ export default function InventoryPage() {
 
   return (
     <div className="space-y-6 relative">
-      {/* 1. HEADER */}
+      {/* HEADER */}
       <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div className="relative w-full md:w-96">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />

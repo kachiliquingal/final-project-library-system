@@ -5,7 +5,7 @@ import AdminHeader from "./AdminHeader";
 export default function AdminLayout() {
   const location = useLocation();
 
-  // Determinar título según la ruta (simple switch)
+  // TITLE ACCORDING TO THE ROUTE
   const getTitle = () => {
     switch (location.pathname) {
       case "/admin/inventory":
@@ -21,14 +21,14 @@ export default function AdminLayout() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex font-sans">
-      {/* 1. Sidebar Fijo */}
+      {/* FIXED SIDEBAR */}
       <AdminSidebar />
 
-      {/* 2. Área de Contenido Principal (con margen a la izquierda para no tapar el sidebar) */}
+      {/* MAIN CONTENT AREA */}
       <main className="flex-1 ml-64 flex flex-col min-h-screen transition-all">
         <AdminHeader title={getTitle()} />
 
-        {/* 3. Aquí se inyectan las páginas */}
+        {/* PAGES ARE INJECTED HERE */}
         <div className="p-8 flex-1 overflow-y-auto">
           <Outlet />
         </div>

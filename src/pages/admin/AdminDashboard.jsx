@@ -17,7 +17,6 @@ import {
   ClipboardList,
   CheckSquare,
   Users,
-  AlertCircle,
   Trophy,
   Download,
   FileText,
@@ -133,7 +132,7 @@ export default function AdminDashboard() {
     staleTime: 0,
   });
 
-  // --- HELPERS ---
+  // HELPERS
   const getReportTitle = (range) => {
     switch (range) {
       case "month":
