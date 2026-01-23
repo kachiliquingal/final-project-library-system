@@ -54,6 +54,55 @@ To run this project locally on your machine:
 6.  **Open in browser:**
     Go to `http://localhost:5173/`
 
+
+    
+   ---
+
+   ## 🐳 Deployment with Docker 
+
+The application is fully containerized and published on Docker Hub. This ensures the application runs consistently on any machine without complex setups.
+### Prerequisites 
+
+Before running the command, make sure you have **Docker Engine** or **Docker Desktop** installed and running on your machine.
+* [Download Docker Desktop](https://www.docker.com/products/docker-desktop/)
+
+  ---
+
+    ### Option A: Run via Docker Hub (Recommended)
+    This is the fastest way to run the application. You do **not** need to clone the repository or install Node.js.
+
+    **1. Open your Terminal**
+    
+       Open Command Prompt (cmd), PowerShell, or Terminal.
+
+    **2. Run the container**
+
+    Copy and paste the following command. This will automatically download the latest version of the app and start the server.
+    
+    ```bash
+    docker run -p 8080:80 kachiliquingal/uce-library-system:latest
+    ```
+
+    **3. Access the app:**
+    
+       Once the command is running, open your web browser and navigate to: `http://localhost:8080`
+
+
+    ### Option B: Build Locally
+       If you have cloned the repository and want to build the image from the source code yourself:
+    
+    **1. Build the image:**
+    ```bash
+    docker build -t uce-library-system .
+    ```
+
+
+    **2. Run the container:**
+    ```bash
+    docker run -p 8080:80 uce-library-system
+    ```
+
+
 ## 📂 Project Structure
 
 * **`src/store/`**
