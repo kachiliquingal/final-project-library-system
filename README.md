@@ -89,7 +89,7 @@ Before running the command, make sure you have **Docker Engine** or **Docker Des
 
 
     ### Option B: Build Locally
-       If you have cloned the repository and want to build the image from the source code yourself:
+  If you have cloned the repository and want to build the image from the source code yourself:
     
     **1. Build the image:**
     ```bash
@@ -101,6 +101,18 @@ Before running the command, make sure you have **Docker Engine** or **Docker Des
     ```bash
     docker run -p 8080:80 uce-library-system
     ```
+
+    ### Option C: Run with Docker Compose (The Easiest Way)
+  If you have the source code, you don't need to memorize long commands. Simply run:
+    
+    
+    ```bash
+    docker-compose up
+    ```
+
+    This command automatically pulls the image and sets up the container with the correct ports.
+
+
 
 
 ## 📂 Project Structure
