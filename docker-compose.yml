@@ -1,0 +1,10 @@
+services:
+  library-app:
+    # Official Docker Hub image
+    image: kachiliquingal/uce-library-system:latest
+    container_name: uce-library-container
+    # If the container crashes, it will restart automatically (resilience)
+    restart: always
+    # Map port 8080 on the host to port 80 in the container
+    ports:
+      - "8080:80"
