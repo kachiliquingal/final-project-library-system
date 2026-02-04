@@ -35,7 +35,10 @@ export default function UserCatalog() {
   } = useQuery({
     queryKey: ["catalog", page, debouncedSearchTerm],
     queryFn: async () => {
-      let query = supabase.from("books").select("*", { count: "exact" });
+      let query = supabase
+        .from("books")
+        .select("*", { count: "exact" })
+        .eq("is_active", true);
 
       if (debouncedSearchTerm) {
         query = query.or(

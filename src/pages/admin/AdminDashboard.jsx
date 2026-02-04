@@ -60,7 +60,10 @@ export default function AdminDashboard() {
       // 3. RUN EVERYTHING IN PARALLEL
       const [booksRes, usersRes, activeLoansRes, borrowedDataRes, returnedRes] =
         await Promise.all([
-          supabase.from("books").select("*", { count: "exact", head: true }),
+          supabase
+            .from("books")
+            .select("*", { count: "exact", head: true })
+            .eq("is_active", true),
           supabase.from("profiles").select("*", { count: "exact", head: true }),
           supabase
             .from("loans")
