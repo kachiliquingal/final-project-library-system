@@ -17,6 +17,8 @@ A comprehensive library management system developed for the Central University o
 
 <br/>
 
+---
+
 ## Technologies Used
 
 * **Core:** [React](https://react.dev/) + [Vite](https://vitejs.dev/)
