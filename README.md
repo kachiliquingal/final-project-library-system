@@ -2,6 +2,20 @@
 
 A comprehensive library management system developed for the Central University of Ecuador. It features real-time inventory management, role-based access control (Admin/Student), management reporting (PDF/CSV), and automated email notifications.
 
+<div align="center">
+  <img src="./screenshots/login-preview.png" alt="Login Screen" width="800"/>
+  <p><em>Secure Authentication Portal with Role-Based Access</em></p>
+  <br/>
+
+  <img src="./screenshots/dashboard-preview.png" alt="Admin Dashboard" width="800"/>
+  <p><em>Real-time Administrative Dashboard & Analytics</em></p>
+  <br/>
+
+  <img src="./screenshots/catalog-preview.png" alt="Student Catalog" width="800"/>
+  <p><em>Student Book Catalog with Search & Loan Request</em></p>
+</div>
+
+<br/>
 
 ## Technologies Used
 
