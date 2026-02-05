@@ -138,7 +138,9 @@ Before running the command, make sure you have **Docker Engine** or **Docker Des
     * `LoginPage.jsx`: Central authentication view.
 
 * **`src/components/`**
-    * `admin/` & `user/`: Role-specific Layouts, Headers, and Sidebars.
+    * `auth/`: Reusable authentication components (`AuthForm`, `WelcomeSection`) ensuring separation of concerns.
+    * `admin/` & `user/`: Role-specific Layouts, Headers, Tables, and Sidebars.
+    * `common/`: Shared UI components like `Pagination`, `SuccessModal`, etc.
     * `ProtectedRoute.jsx`: Security component that implements Role-Based Access Control (RBAC).
 
 * **`src/utils/`**
